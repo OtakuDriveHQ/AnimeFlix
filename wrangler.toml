@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 TARGET_URL = "https://gdflix.io"
 AUTH_USERNAME = "admin9122"
 AUTH_PASSWORD = "Harry@2026#"
-DOWNLOAD_WORKER_URL = "https://gdflix-download-page.livetyari.workers.dev"
+DOWNLOAD_WORKER_URL = "https://downloads.otakudrivehq.workers.dev"
 
 [[kv_namespaces]]
 binding = "BOT_KV"

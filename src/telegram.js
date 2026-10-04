@@ -1289,7 +1289,7 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
       dlWorkerOrigin = env.DOWNLOAD_WORKER_URL;
     }
     if (!dlWorkerOrigin) {
-      dlWorkerOrigin = "https://gdflix-download-page.livetyari.workers.dev";
+      dlWorkerOrigin = "https://downloads.otakudrivehq.workers.dev";
     }
 
     const pageUrl = dlWorkerOrigin.replace(/\/$/, "") + "/d?p=" + encodeURIComponent(b64Payload);
