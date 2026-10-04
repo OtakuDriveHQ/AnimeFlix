@@ -22,14 +22,41 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Deploy Main Worker to Cloudflare
+      - name: Prepare Cloudflare Credentials
         run: |
-          CLEAN_TOKEN=$(printf '%s' "$RAW_TOKEN" | tr -d '\r\n[:space:]')
-          CLEAN_ACCOUNT_ID=$(printf '%s' "$RAW_ACCOUNT_ID" | tr -d '\r\n[:space:]')
-          CLOUDFLARE_API_TOKEN="$CLEAN_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CLEAN_ACCOUNT_ID" npx wrangler deploy
+          node -e '
+            const rawToken = process.env.RAW_TOKEN || "";
+            const rawAccountId = process.env.RAW_ACCOUNT_ID || "";
+            const cleanToken = rawToken
+              .replace(/^(bearer|cloudflare_api_token=)\s*/i, "")
+              .replace(/^["'"'"']|["'"'"']$/g, "")
+              .trim();
+            const cleanAccountId = rawAccountId
+              .replace(/^cloudflare_account_id=\s*/i, "")
+              .replace(/^["'"'"']|["'"'"']$/g, "")
+              .trim();
+
+            console.log("Cleaned Token length:", cleanToken.length);
+            console.log("Cleaned Account ID length:", cleanAccountId.length);
+
+            if (!cleanToken) {
+              console.error("ERROR: CLOUDFLARE_API_TOKEN is empty! Please set it in GitHub Secrets.");
+              process.exit(1);
+            }
+            if (!cleanAccountId) {
+              console.error("ERROR: CLOUDFLARE_ACCOUNT_ID is empty! Please set it in GitHub Secrets.");
+              process.exit(1);
+            }
+
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_API_TOKEN=${cleanToken}\nCLOUDFLARE_ACCOUNT_ID=${cleanAccountId}\n`);
+          '
         env:
           RAW_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           RAW_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy Main Worker to Cloudflare
+        run: npx wrangler deploy
 
   deploy-download-worker:
     name: Deploy Dedicated Download Page Worker
@@ -47,12 +74,27 @@ jobs:
         working-directory: download-worker
         run: npm install
 
-      - name: Deploy Download Worker to Cloudflare
-        working-directory: download-worker
+      - name: Prepare Cloudflare Credentials
         run: |
-          CLEAN_TOKEN=$(printf '%s' "$RAW_TOKEN" | tr -d '\r\n[:space:]')
-          CLEAN_ACCOUNT_ID=$(printf '%s' "$RAW_ACCOUNT_ID" | tr -d '\r\n[:space:]')
-          CLOUDFLARE_API_TOKEN="$CLEAN_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CLEAN_ACCOUNT_ID" npx wrangler deploy
+          node -e '
+            const rawToken = process.env.RAW_TOKEN || "";
+            const rawAccountId = process.env.RAW_ACCOUNT_ID || "";
+            const cleanToken = rawToken
+              .replace(/^(bearer|cloudflare_api_token=)\s*/i, "")
+              .replace(/^["'"'"']|["'"'"']$/g, "")
+              .trim();
+            const cleanAccountId = rawAccountId
+              .replace(/^cloudflare_account_id=\s*/i, "")
+              .replace(/^["'"'"']|["'"'"']$/g, "")
+              .trim();
+
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_API_TOKEN=${cleanToken}\nCLOUDFLARE_ACCOUNT_ID=${cleanAccountId}\n`);
+          '
         env:
           RAW_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           RAW_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy Download Worker to Cloudflare
+        working-directory: download-worker
+        run: npx wrangler deploy
