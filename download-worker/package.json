@@ -1,0 +1,14 @@
+{
+  "name": "gdflix-download-worker",
+  "version": "1.0.0",
+  "description": "Dedicated Cloudflare Worker for Episode Download Landing Page & Direct Link Extraction",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.146.0"
+  }
+}

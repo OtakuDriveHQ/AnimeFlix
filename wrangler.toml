@@ -1,0 +1,17 @@
+name = "gdflix-scraper"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+TARGET_URL = "https://gdflix.io"
+AUTH_USERNAME = "admin9122"
+AUTH_PASSWORD = "Harry@2026#"
+DOWNLOAD_WORKER_URL = "https://gdflix-download-page.livetyari.workers.dev"
+
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "d38246be9fbb4c499bc03e2e3f31c71b"
+
+[triggers]
+crons = ["* * * * *"]

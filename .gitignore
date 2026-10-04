@@ -1,0 +1,22 @@
+# Node dependencies
+node_modules/
+package-lock.json
+
+# Cloudflare Wrangler build artifacts & logs
+.wrangler/
+dist/
+.env*
+
+# Scratch & debug scripts
+scratch/
+scratch_*.js
+*.bak
+*.log
+*.html
+!src/**
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

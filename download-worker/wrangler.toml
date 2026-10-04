@@ -1,0 +1,9 @@
+name = "gdflix-download-page"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Optional KV namespace for direct link caching (1 hour TTL)
+[[kv_namespaces]]
+binding = "DOWNLOAD_KV"
+id = "d38246be9fbb4c499bc03e2e3f31c71b"
