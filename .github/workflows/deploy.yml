@@ -27,17 +27,21 @@ jobs:
           node -e '
             const rawToken = process.env.RAW_TOKEN || "";
             const rawAccountId = process.env.RAW_ACCOUNT_ID || "";
-            const cleanToken = rawToken
-              .replace(/^(bearer|cloudflare_api_token=)\s*/i, "")
-              .replace(/^["'"'"']|["'"'"']$/g, "")
-              .trim();
-            const cleanAccountId = rawAccountId
-              .replace(/^cloudflare_account_id=\s*/i, "")
-              .replace(/^["'"'"']|["'"'"']$/g, "")
-              .trim();
 
-            console.log("Cleaned Token length:", cleanToken.length);
-            console.log("Cleaned Account ID length:", cleanAccountId.length);
+            const tokenMatch = rawToken.match(/cfut_[a-zA-Z0-9_-]+/i)
+                            || rawToken.match(/Bearer\s+([a-zA-Z0-9_-]+)/i)
+                            || rawToken.match(/[a-zA-Z0-9_-]{40,}/);
+            const cleanToken = tokenMatch
+              ? (tokenMatch[1] || tokenMatch[0])
+              : rawToken.replace(/^(bearer|cloudflare_api_token=)\s*/i, "").replace(/^["'"'"']|["'"'"']$/g, "").trim();
+
+            const idMatch = rawAccountId.match(/[a-f0-9]{32}/i);
+            const cleanAccountId = idMatch
+              ? idMatch[0]
+              : rawAccountId.replace(/^cloudflare_account_id=\s*/i, "").replace(/^["'"'"']|["'"'"']$/g, "").trim();
+
+            console.log("Extracted Token length:", cleanToken.length);
+            console.log("Extracted Account ID length:", cleanAccountId.length);
 
             if (!cleanToken) {
               console.error("ERROR: CLOUDFLARE_API_TOKEN is empty! Please set it in GitHub Secrets.");
@@ -79,14 +83,18 @@ jobs:
           node -e '
             const rawToken = process.env.RAW_TOKEN || "";
             const rawAccountId = process.env.RAW_ACCOUNT_ID || "";
-            const cleanToken = rawToken
-              .replace(/^(bearer|cloudflare_api_token=)\s*/i, "")
-              .replace(/^["'"'"']|["'"'"']$/g, "")
-              .trim();
-            const cleanAccountId = rawAccountId
-              .replace(/^cloudflare_account_id=\s*/i, "")
-              .replace(/^["'"'"']|["'"'"']$/g, "")
-              .trim();
+
+            const tokenMatch = rawToken.match(/cfut_[a-zA-Z0-9_-]+/i)
+                            || rawToken.match(/Bearer\s+([a-zA-Z0-9_-]+)/i)
+                            || rawToken.match(/[a-zA-Z0-9_-]{40,}/);
+            const cleanToken = tokenMatch
+              ? (tokenMatch[1] || tokenMatch[0])
+              : rawToken.replace(/^(bearer|cloudflare_api_token=)\s*/i, "").replace(/^["'"'"']|["'"'"']$/g, "").trim();
+
+            const idMatch = rawAccountId.match(/[a-f0-9]{32}/i);
+            const cleanAccountId = idMatch
+              ? idMatch[0]
+              : rawAccountId.replace(/^cloudflare_account_id=\s*/i, "").replace(/^["'"'"']|["'"'"']$/g, "").trim();
 
             const fs = require("fs");
             fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_API_TOKEN=${cleanToken}\nCLOUDFLARE_ACCOUNT_ID=${cleanAccountId}\n`);
