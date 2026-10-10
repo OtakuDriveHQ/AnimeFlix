@@ -733,14 +733,13 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
     try {
       log(`HubCloud attempt ${attempt + 1}: fetching step 1 ${hubcloudUrl}`);
       // 1. Fetch HubCloud Initial Page
-      const res1 = await fetch(hubcloudUrl, {
-        headers: baseHeaders,
-        redirect: "follow",
+      const res1 = await fetchWithCookies(hubcloudUrl, {
         signal: AbortSignal.timeout(20000),
       });
       log(`HubCloud step 1 status: ${res1.status}, url: ${res1.url}`);
       if (!res1.ok) {
-        log(`HubCloud Step 1 returned HTTP ${res1.status}`);
+        const errBody = await res1.text().catch(() => "");
+        log(`HubCloud Step 1 returned HTTP ${res1.status}: ${errBody.slice(0, 300)}`);
         if (attempt < retries) continue;
         return null;
       }
@@ -773,16 +772,14 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
       log(`HubCloud step 2 URL: ${step2Url}`);
 
       // 2. Fetch Step 2 (hubcloud.php)
-      const res2 = await fetch(step2Url, {
+      const res2 = await fetchWithCookies(step2Url, {
         headers: {
-          ...baseHeaders,
           "Referer": res1.url,
         },
-        redirect: "follow",
         signal: AbortSignal.timeout(20000),
       });
       if (!res2.ok) {
-        console.warn("HubCloud Step 2 returned HTTP", res2.status);
+        log(`HubCloud Step 2 returned HTTP ${res2.status}`);
         if (attempt < retries) continue;
         return null;
       }
@@ -805,19 +802,19 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
         if (mDanger) step3Url = mDanger[1];
       }
       if (!step3Url) {
-        console.warn("Could not find Step 2 button in HubCloud HTML");
+        log("Could not find Step 2 button in HubCloud HTML");
         if (attempt < retries) continue;
         return null;
       }
 
       step3Url = new URL(step3Url, res2.url).href;
+      log(`HubCloud step 3 URL: ${step3Url}`);
 
       // 3. Resolve Step 3 (gpdl link)
       let targetUrl = step3Url;
       try {
-        const r3Manual = await fetch(step3Url, {
+        const r3Manual = await fetchWithCookies(step3Url, {
           headers: {
-            ...baseHeaders,
             "Referer": res2.url,
           },
           redirect: "manual",
@@ -841,12 +838,10 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
         }
       } catch (e) {}
 
-      const res3 = await fetch(targetUrl, {
+      const res3 = await fetchWithCookies(targetUrl, {
         headers: {
-          ...baseHeaders,
           "Referer": step3Url,
         },
-        redirect: "follow",
         signal: AbortSignal.timeout(20000),
       });
 

@@ -193,7 +193,8 @@ export function parseCookieInput(input) {
 export function buildCookieHeader(hostname, extraCookies = null) {
   const isGdflix = hostname.includes("gdflix");
   const isArchive = hostname.includes("archive.toonworld4all.me") || hostname.includes("toonworld4all");
-  const isCloudflareOrProtected = hostname.includes("cloudflare") || isArchive || isGdflix;
+  const isHubcloud = hostname.includes("hubcloud") || hostname.includes("gamerxyt") || hostname.includes("sportverse");
+  const isCloudflareOrProtected = hostname.includes("cloudflare") || isArchive || isGdflix || isHubcloud;
 
   const extra = parseCookieInput(extraCookies);
   const all = [...COOKIES, ...extra];
