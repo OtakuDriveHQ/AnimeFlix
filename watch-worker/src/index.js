@@ -62,8 +62,8 @@ function getPlayerHtml(videoUrl) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Playing Video - AnimeFlix Player</title>
-    <!-- Plyr CSS -->
-    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <!-- Video.js CSS -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
         body { 
             margin: 0; 
@@ -83,10 +83,21 @@ function getPlayerHtml(videoUrl) {
             max-width: 100vw;
             max-height: 100vh;
         }
-        /* Custom Plyr theme colors for AnimeFlix */
-        :root {
-            --plyr-color-main: #38bdf8;
-            --plyr-video-background: #000;
+        /* Make Video.js player fill the screen and customize color */
+        .video-js {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .vjs-theme-animeflix {
+            --vjs-theme-fantasy--primary: #38bdf8;
+        }
+        .video-js .vjs-control-bar,
+        .video-js .vjs-big-play-button {
+            background-color: rgba(15, 23, 42, 0.7);
+        }
+        .video-js .vjs-play-progress,
+        .video-js .vjs-volume-level {
+            background-color: #38bdf8;
         }
         .error-overlay {
             position: absolute;
@@ -107,34 +118,38 @@ function getPlayerHtml(videoUrl) {
 </head>
 <body>
     <div class="player-container">
-        <video id="player" playsinline controls data-poster="">
+        <video
+            id="player"
+            class="video-js vjs-default-skin vjs-big-play-centered"
+            controls
+            preload="auto"
+            autoplay
+            data-setup='{"fluid": false}'
+        >
             <source src="${safeUrl}" type="video/mp4" />
+            <p class="vjs-no-js">
+              To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video.
+            </p>
         </video>
     </div>
     
     <div class="error-overlay" id="error-box">
         <h2>Video Failed to Load</h2>
-        <p>The link might be expired, IP-locked, or the video format is unsupported by your browser.</p>
+        <p>The link might be expired, IP-locked, or the video format (.mkv) is unsupported by your browser.</p>
         <p style="font-size: 0.9em; color: #94a3b8; max-width: 500px; word-wrap: break-word;">${safeUrl}</p>
         <a href="${safeUrl}" target="_blank">Try Downloading Directly</a>
         <a href="/" style="margin-left: 10px; border-color: #94a3b8; color: #94a3b8;">Go Back</a>
     </div>
 
-    <!-- Plyr JS -->
-    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+    <!-- Video.js JS -->
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const player = new Plyr('#player', {
-                controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
-                settings: ['captions', 'quality', 'speed', 'loop'],
-                autoplay: true
-            });
-
-            const videoElement = document.getElementById('player');
+            const player = videojs('player');
             
             // Handle native video errors
-            videoElement.addEventListener('error', function(e) {
-                console.error("Video error:", videoElement.error);
+            player.on('error', function() {
+                console.error("Video error:", player.error());
                 document.getElementById('error-box').style.display = 'flex';
             });
         });
