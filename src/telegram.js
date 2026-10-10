@@ -712,36 +712,40 @@ async function followRedirectChain(startUrl) {
  * - Step 2: Open hubcloud.php intermediate page -> Find "Download [Server : 10Gbps]" button
  * - Step 3: Follow redirect (to worker or dl.php) -> Extract Google CDN video link from ?link= or #downloadBtn
  */
-export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
+export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debugLogs = null) {
   if (!hubcloudUrl) return null;
+  const log = (msg) => {
+    console.log(msg);
+    if (Array.isArray(debugLogs)) debugLogs.push(msg);
+  };
   const GOOGLE_RE = /https?:\/\/video-downloads\.googleusercontent\.com\/[^\s"'<>]+/i;
   const MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
   const baseHeaders = {
     "User-Agent": MOBILE_UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://new4.gdflix.io/",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
+    "Upgrade-Insecure-Requests": "1",
   };
 
   if (GOOGLE_RE.test(hubcloudUrl)) return hubcloudUrl.match(GOOGLE_RE)[0];
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      log(`HubCloud attempt ${attempt + 1}: fetching step 1 ${hubcloudUrl}`);
       // 1. Fetch HubCloud Initial Page
       const res1 = await fetch(hubcloudUrl, {
         headers: baseHeaders,
         redirect: "follow",
         signal: AbortSignal.timeout(20000),
       });
+      log(`HubCloud step 1 status: ${res1.status}, url: ${res1.url}`);
       if (!res1.ok) {
-        console.warn("HubCloud Step 1 returned HTTP", res1.status);
+        log(`HubCloud Step 1 returned HTTP ${res1.status}`);
         if (attempt < retries) continue;
         return null;
       }
       const html1 = await res1.text();
+      log(`HubCloud step 1 body length: ${html1.length}`);
 
       // Find Step 1 button: "Generate Direct Download Link" or link with "hubcloud.php"
       let step2Url = null;
@@ -760,12 +764,13 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
         if (mPhp) step2Url = mPhp[1];
       }
       if (!step2Url) {
-        console.warn("Could not find Step 1 button in HubCloud HTML");
+        log("Could not find Step 1 button in HubCloud HTML. Preview: " + html1.slice(0, 300));
         if (attempt < retries) continue;
         return null;
       }
 
       step2Url = new URL(step2Url, res1.url).href;
+      log(`HubCloud step 2 URL: ${step2Url}`);
 
       // 2. Fetch Step 2 (hubcloud.php)
       const res2 = await fetch(step2Url, {

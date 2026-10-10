@@ -224,6 +224,8 @@ async function handleExtractDirect(url, request) {
   const raw = url.searchParams.get("url");
   if (!raw) return errorResponse(400, "Missing ?url=");
   const type = (url.searchParams.get("type") || "").toLowerCase();
+  const isDebug = url.searchParams.get("debug") === "1";
+  const debugLogs = isDebug ? [] : null;
   let target;
   try { target = decodeURIComponent(raw); new URL(target); }
   catch { return errorResponse(400, "Invalid url"); }
@@ -233,7 +235,7 @@ async function handleExtractDirect(url, request) {
     let usedPlatform = "gdflix";
 
     if (type === "hubcloud" || /hubcloud|gamerxyt|sportverse/i.test(target)) {
-      directUrl = await extractHubcloudDownloadLink(target);
+      directUrl = await extractHubcloudDownloadLink(target, 1, debugLogs);
       usedPlatform = "hubcloud";
     } else {
       directUrl = await extractInstantDownloadLink(target);
@@ -241,15 +243,19 @@ async function handleExtractDirect(url, request) {
       // Fallback: if gdflix failed and hubcloud was provided
       if (!directUrl && url.searchParams.get("hubcloudUrl")) {
         const hubUrl = decodeURIComponent(url.searchParams.get("hubcloudUrl"));
-        directUrl = await extractHubcloudDownloadLink(hubUrl);
+        directUrl = await extractHubcloudDownloadLink(hubUrl, 1, debugLogs);
         if (directUrl) usedPlatform = "hubcloud";
       }
     }
 
     if (directUrl && /^https?:\/\//i.test(directUrl)) {
-      return jsonResponse({ ok: true, directUrl, target, platform: usedPlatform });
+      const res = { ok: true, directUrl, target, platform: usedPlatform };
+      if (isDebug) res.debug = debugLogs;
+      return jsonResponse(res);
     }
-    return jsonResponse({ ok: false, error: "Could not generate direct CDN link for this platform." }, 200);
+    const res = { ok: false, error: "Could not generate direct CDN link for this platform." };
+    if (isDebug) res.debug = debugLogs;
+    return jsonResponse(res, 200);
   } catch (err) {
     return errorResponse(500, err.message || "Extraction error");
   }

@@ -399,6 +399,17 @@ async function followRedirectChain(startUrl) {
   return null;
 }
 
+function getHubcloudHeaders(referer = null) {
+  const headers = {
+    "User-Agent": CHROME_MOBILE_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+  };
+  if (referer) headers["Referer"] = referer;
+  return headers;
+}
+
 /**
  * Dedicated multi-hop extractor for HubCloud platform download links:
  * - Step 1: Open HubCloud landing page -> Find "Generate Direct Download Link" button
@@ -413,7 +424,7 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
     try {
       // 1. Fetch HubCloud Initial Page
       const res1 = await fetch(hubcloudUrl, {
-        headers: getBrowserHeaders(hubcloudUrl),
+        headers: getHubcloudHeaders(),
         redirect: "follow",
         signal: AbortSignal.timeout(20000),
       });
@@ -450,10 +461,7 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
 
       // 2. Fetch Step 2 (hubcloud.php)
       const res2 = await fetch(step2Url, {
-        headers: {
-          ...getBrowserHeaders(step2Url),
-          "Referer": res1.url,
-        },
+        headers: getHubcloudHeaders(res1.url),
         redirect: "follow",
         signal: AbortSignal.timeout(20000),
       });
@@ -492,10 +500,7 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
       let targetUrl = step3Url;
       try {
         const r3Manual = await fetch(step3Url, {
-          headers: {
-            ...getBrowserHeaders(step3Url),
-            "Referer": res2.url,
-          },
+          headers: getHubcloudHeaders(res2.url),
           redirect: "manual",
           signal: AbortSignal.timeout(10000),
         });
@@ -518,10 +523,7 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
       } catch (e) {}
 
       const res3 = await fetch(targetUrl, {
-        headers: {
-          ...getBrowserHeaders(targetUrl),
-          "Referer": step3Url,
-        },
+        headers: getHubcloudHeaders(step3Url),
         redirect: "follow",
         signal: AbortSignal.timeout(20000),
       });
