@@ -1,6 +1,28 @@
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    
+    // Serve as a CORS proxy for the video stream so WASM can read the bytes
+    if (url.pathname === "/proxy") {
+      const target = url.searchParams.get("url");
+      if (!target) return new Response("Missing URL", { status: 400 });
+      
+      const reqHeaders = new Headers(request.headers);
+      reqHeaders.delete("Origin");
+      reqHeaders.delete("Referer");
+      
+      const response = await fetch(target, {
+        method: request.method,
+        headers: reqHeaders,
+        redirect: "follow"
+      });
+      
+      const newResponse = new Response(response.body, response);
+      newResponse.headers.set("Access-Control-Allow-Origin", "*");
+      newResponse.headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+      return newResponse;
+    }
+
     const videoUrl = url.searchParams.get("url") || url.searchParams.get("v");
 
     if (!videoUrl) {
@@ -9,8 +31,14 @@ export default {
       });
     }
 
-    return new Response(getPlayerHtml(videoUrl), {
-      headers: { "Content-Type": "text/html;charset=UTF-8" }
+    const html = getPlayerHtml(videoUrl);
+    return new Response(html, {
+      headers: { 
+        "Content-Type": "text/html;charset=UTF-8",
+        // Enable SharedArrayBuffer fast-path for WASM
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      }
     });
   }
 };
@@ -35,9 +63,9 @@ function getLandingHtml() {
 </head>
 <body>
     <h1>AnimeFlix Player</h1>
-    <p>Provide a direct video link (Google CDN, GDFlix, etc.) to start streaming.</p>
+    <p>Provide a direct video link to start streaming using Movi Player (MKV supported!).</p>
     <div class="input-group">
-        <input type="text" id="vUrl" placeholder="https://video-downloads.googleusercontent.com/...">
+        <input type="text" id="vUrl" placeholder="https://video-downloads...">
         <button onclick="playVideo()">Play</button>
     </div>
     <script>
@@ -53,8 +81,9 @@ function getLandingHtml() {
 }
 
 function getPlayerHtml(videoUrl) {
-  // Sanitize the URL to prevent XSS
   const safeUrl = videoUrl.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Use our worker as a CORS proxy so the WASM engine can fetch byte ranges
+  const proxyUrl = "/proxy?url=" + encodeURIComponent(videoUrl);
   
   return `<!DOCTYPE html>
 <html lang="en">
@@ -62,8 +91,6 @@ function getPlayerHtml(videoUrl) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Playing Video - AnimeFlix Player</title>
-    <!-- Video.js CSS -->
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
         body { 
             margin: 0; 
@@ -75,83 +102,22 @@ function getPlayerHtml(videoUrl) {
             align-items: center; 
             justify-content: center; 
             overflow: hidden;
-            font-family: system-ui, -apple-system, sans-serif;
         }
-        .player-container {
+        movi-player {
             width: 100%;
             height: 100%;
-            max-width: 100vw;
-            max-height: 100vh;
+            --movi-theme-primary: #38bdf8;
         }
-        /* Make Video.js player fill the screen and customize color */
-        .video-js {
-            width: 100% !important;
-            height: 100% !important;
-        }
-        .vjs-theme-animeflix {
-            --vjs-theme-fantasy--primary: #38bdf8;
-        }
-        .video-js .vjs-control-bar,
-        .video-js .vjs-big-play-button {
-            background-color: rgba(15, 23, 42, 0.7);
-        }
-        .video-js .vjs-play-progress,
-        .video-js .vjs-volume-level {
-            background-color: #38bdf8;
-        }
-        .error-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.8);
-            color: #f87171;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 99;
-            text-align: center;
-            padding: 20px;
-        }
-        .error-overlay h2 { margin-top: 0; }
-        .error-overlay a { color: #38bdf8; text-decoration: none; margin-top: 15px; display: inline-block; padding: 10px 20px; border: 1px solid #38bdf8; border-radius: 6px; }
     </style>
 </head>
 <body>
-    <div class="player-container">
-        <video
-            id="player"
-            class="video-js vjs-default-skin vjs-big-play-centered"
-            controls
-            preload="auto"
-            autoplay
-            data-setup='{"fluid": false}'
-        >
-            <source src="${safeUrl}" type="video/mp4" />
-            <p class="vjs-no-js">
-              To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video.
-            </p>
-        </video>
-    </div>
+    <movi-player src="${proxyUrl}" fallback="native" controls autoplay></movi-player>
     
-    <div class="error-overlay" id="error-box">
-        <h2>Video Failed to Load</h2>
-        <p>The link might be expired, IP-locked, or the video format (.mkv) is unsupported by your browser.</p>
-        <p style="font-size: 0.9em; color: #94a3b8; max-width: 500px; word-wrap: break-word;">${safeUrl}</p>
-        <a href="${safeUrl}" target="_blank">Try Downloading Directly</a>
-        <a href="/" style="margin-left: 10px; border-color: #94a3b8; color: #94a3b8;">Go Back</a>
-    </div>
-
-    <!-- Video.js JS -->
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/movi-player/dist/element.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const player = videojs('player');
-            
-            // Handle native video errors
-            player.on('error', function() {
-                console.error("Video error:", player.error());
-                document.getElementById('error-box').style.display = 'flex';
-            });
+        const player = document.querySelector('movi-player');
+        player.addEventListener('nativefallback', () => {
+            console.warn('Movi Player fell back to native browser decoding (likely unsupported format or CORS issue).');
         });
     </script>
 </body>
