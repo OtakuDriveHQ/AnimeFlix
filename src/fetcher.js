@@ -45,7 +45,13 @@ export async function fetchWithCookies(url, options = {}) {
   headers.set("Upgrade-Insecure-Requests", "1");
   headers.set("Sec-Fetch-Dest", "document");
   headers.set("Sec-Fetch-Mode", "navigate");
-  headers.set("Sec-Fetch-Site", "none");
+  
+  if (headers.has("Referer")) {
+    headers.set("Sec-Fetch-Site", "cross-site");
+  } else {
+    headers.set("Sec-Fetch-Site", "none");
+  }
+  
   headers.set("Sec-Fetch-User", "?1");
 
   const response = await fetch(url, {
