@@ -106,3 +106,36 @@ jobs:
       - name: Deploy Download Worker to Cloudflare
         working-directory: download-worker
         run: npx wrangler deploy
+
+  deploy-watch-worker:
+    name: Deploy Watch Video Player Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        working-directory: watch-worker
+        run: npm install
+
+      - name: Prepare Cloudflare Credentials
+        run: |
+          node -e '
+            const rawToken = process.env.RAW_TOKEN || "";
+            const rawAccountId = process.env.RAW_ACCOUNT_ID || "";
+            const cleanToken = (rawToken.match(/cfut_[a-zA-Z0-9_-]+/i) || rawToken.match(/Bearer\s+([a-zA-Z0-9_-]+)/i) || rawToken.match(/[a-zA-Z0-9_-]{40,}/) || [{}] )[0] || rawToken.trim();
+            const cleanAccountId = (rawAccountId.match(/[a-f0-9]{32}/i) || [{}] )[0] || rawAccountId.trim();
+            require("fs").appendFileSync(process.env.GITHUB_ENV, "CLOUDFLARE_API_TOKEN=" + cleanToken + "\nCLOUDFLARE_ACCOUNT_ID=" + cleanAccountId + "\n");
+          '
+        env:
+          RAW_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RAW_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy Watch Worker to Cloudflare
+        working-directory: watch-worker
+        run: npx wrangler deploy

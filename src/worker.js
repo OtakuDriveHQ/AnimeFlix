@@ -1607,7 +1607,8 @@ function onGenerateDirectLink(btn, url, type) {
     .then(function(d) {
       if (d && d.ok && d.directUrl) {
         btn.outerHTML = "<a href=\\"" + safe(d.directUrl) + "\\" target=\\"_blank\\" rel=\\"noopener\\" class=\\"p-btn-direct-ready\\" title=\\"High-Speed Direct Google CDN Link\\">&#9889; Direct CDN Link &rarr;</a>" +
-          "<button class=\\"p-btn-copy\\" onclick=\\"copyLink(this, '" + safe(d.directUrl) + "')\\" title=\\"Copy Direct CDN Link\\">&#128203;</button>";
+          "<button class=\\"p-btn-copy\\" onclick=\\"copyLink(this, '" + safe(d.directUrl) + "')\\" title=\\"Copy Direct CDN Link\\">&#128203;</button>" +
+          "<a href=\\"https://watch.otakudrivehq.workers.dev/?url=" + encodeURIComponent(d.directUrl) + "\\" target=\\"_blank\\" class=\\"p-btn-play\\" title=\\"Play Video in Web Player\\">&#9654; Play</a>";
       } else {
         btn.disabled = false;
         btn.innerHTML = origHtml;
@@ -1819,6 +1820,8 @@ tr.ck-expired td{opacity:.55}
 .p-btn-gen:disabled{opacity:.65;cursor:wait;transform:none}
 .p-btn-direct-ready{background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px;box-shadow:0 0 10px rgba(16,185,129,.45);white-space:nowrap}
 .p-btn-copy{background:#334155;color:#fff;border:none;border-radius:4px;padding:4px 7px;cursor:pointer;font-size:11px}
+.p-btn-play{background:#ec4899;color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px;box-shadow:0 0 10px rgba(236,72,153,.3);white-space:nowrap;margin-left:4px}
+.p-btn-play:hover{background:#f472b6}
 .p-btn-copy:hover{background:#475569}
 
 /* ── States ── */
