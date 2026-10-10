@@ -1622,7 +1622,7 @@ function onGenerateDirectLink(btn, url, type) {
     .catch(function(e) {
       btn.disabled = false;
       btn.innerHTML = origHtml;
-      if (confirm("Network error: " + e.message + "\n\nWould you like to open the page directly?")) {
+      if (confirm("Network error: " + e.message + "\\n\\nWould you like to open the page directly?")) {
         window.open(url, "_blank");
       }
     });
