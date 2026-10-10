@@ -7,6 +7,19 @@ export default {
       const target = url.searchParams.get("url");
       if (!target) return new Response("Missing URL", { status: 400 });
       
+      // Handle CORS Preflight (OPTIONS)
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range",
+            "Access-Control-Max-Age": "86400"
+          }
+        });
+      }
+      
       const reqHeaders = new Headers(request.headers);
       reqHeaders.delete("Origin");
       reqHeaders.delete("Referer");
@@ -20,6 +33,7 @@ export default {
       const newResponse = new Response(response.body, response);
       newResponse.headers.set("Access-Control-Allow-Origin", "*");
       newResponse.headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+      newResponse.headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
       return newResponse;
     }
 
