@@ -225,7 +225,7 @@ async function handleExtractDirect(url, request) {
   if (!raw) return errorResponse(400, "Missing ?url=");
   const type = (url.searchParams.get("type") || "").toLowerCase();
   const isDebug = url.searchParams.get("debug") === "1";
-  const debugLogs = isDebug ? [] : null;
+  const debugLogs = [];
   let target;
   try { target = decodeURIComponent(raw); new URL(target); }
   catch { return errorResponse(400, "Invalid url"); }
@@ -249,12 +249,11 @@ async function handleExtractDirect(url, request) {
     }
 
     if (directUrl && /^https?:\/\//i.test(directUrl)) {
-      const res = { ok: true, directUrl, target, platform: usedPlatform };
-      if (isDebug) res.debug = debugLogs;
+      const res = { ok: true, directUrl, target, platform: usedPlatform, debug: debugLogs };
       return jsonResponse(res);
     }
-    const res = { ok: false, error: "Could not generate direct CDN link for this platform." };
-    if (isDebug) res.debug = debugLogs;
+    const errText = "Could not generate direct CDN link for this platform.\\nDebug: " + debugLogs.join(" | ");
+    const res = { ok: false, error: errText, debug: debugLogs };
     return jsonResponse(res, 200);
   } catch (err) {
     return errorResponse(500, err.message || "Extraction error");
