@@ -768,6 +768,7 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
         return null;
       }
 
+      step2Url = step2Url.replace(/&amp;/g, "&");
       step2Url = new URL(step2Url, res1.url).href;
       log(`HubCloud step 2 URL: ${step2Url}`);
 
@@ -807,6 +808,7 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
         return null;
       }
 
+      step3Url = step3Url.replace(/&amp;/g, "&");
       step3Url = new URL(step3Url, res2.url).href;
       log(`HubCloud step 3 URL: ${step3Url}`);
 
