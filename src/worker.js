@@ -19,6 +19,8 @@ import {
   saveTelegramConfig,
   setTelegramWebhook,
   getTelegramWebhookInfo,
+  extractInstantDownloadLink,
+  extractHubcloudDownloadLink,
   escapeHtml,
 } from "./telegram.js";
 import { isAuthenticated, handleLogin, handleLogout } from "./auth.js";
@@ -75,7 +77,8 @@ export default {
     if (url.pathname === "/telegram/setup-webhook") return handleTelegramSetupWebhook(request, env, url);
     if (url.pathname === "/telegram/webhook-info") return handleTelegramWebhookInfo(request, env);
     if (url.pathname === "/telegram/config") return handleTelegramConfig(request, env);
-    return errorResponse(404, "Routes: /health | /posts | /post | /episode | /resolve | /scrape | /telegram/send | /telegram/post-channel | /telegram/setup-webhook | /telegram/webhook-info | /telegram/config | /login | /logout");
+    if (url.pathname === "/extract-direct" || url.pathname === "/generate-link") return handleExtractDirect(url, request);
+    return errorResponse(404, "Routes: /health | /posts | /post | /episode | /resolve | /scrape | /extract-direct | /telegram/send | /telegram/post-channel | /telegram/setup-webhook | /telegram/webhook-info | /telegram/config | /login | /logout");
   },
 
   async scheduled(event, env, ctx) {
@@ -213,6 +216,42 @@ async function handleScrape(url) {
     });
   } catch (err) {
     return errorResponse(500, err.message);
+  }
+}
+
+// ─── /extract-direct ──────────────────────────────────────────────────────────
+async function handleExtractDirect(url, request) {
+  const raw = url.searchParams.get("url");
+  if (!raw) return errorResponse(400, "Missing ?url=");
+  const type = (url.searchParams.get("type") || "").toLowerCase();
+  let target;
+  try { target = decodeURIComponent(raw); new URL(target); }
+  catch { return errorResponse(400, "Invalid url"); }
+
+  try {
+    let directUrl = null;
+    let usedPlatform = "gdflix";
+
+    if (type === "hubcloud" || /hubcloud|gamerxyt|sportverse/i.test(target)) {
+      directUrl = await extractHubcloudDownloadLink(target);
+      usedPlatform = "hubcloud";
+    } else {
+      directUrl = await extractInstantDownloadLink(target);
+      usedPlatform = "gdflix";
+      // Fallback: if gdflix failed and hubcloud was provided
+      if (!directUrl && url.searchParams.get("hubcloudUrl")) {
+        const hubUrl = decodeURIComponent(url.searchParams.get("hubcloudUrl"));
+        directUrl = await extractHubcloudDownloadLink(hubUrl);
+        if (directUrl) usedPlatform = "hubcloud";
+      }
+    }
+
+    if (directUrl && /^https?:\/\//i.test(directUrl)) {
+      return jsonResponse({ ok: true, directUrl, target, platform: usedPlatform });
+    }
+    return jsonResponse({ ok: false, error: "Could not generate direct CDN link for this platform." }, 200);
+  } catch (err) {
+    return errorResponse(500, err.message || "Extraction error");
   }
 }
 
@@ -1503,6 +1542,9 @@ function renderEpisodeQualities(data) {
       var redir = file.redirectUrl;
       var dest = file.finalUrl || file.destinationUrl;
       var isAd = file.isAdShortener;
+      var targetLink = dest || redir;
+      var isGdflix = /gdflix/i.test(hostName) || /gdflix/i.test(targetLink);
+      var isHubcloud = /hubcloud/i.test(hostName) || /hubcloud/i.test(targetLink);
 
       html += "<div class=\\"platform-chip\\">";
       html += "<div class=\\"platform-info\\"><span class=\\"p-name\\">" + safe(hostName) + "</span>";
@@ -1512,7 +1554,12 @@ function renderEpisodeQualities(data) {
       html += "</div>";
       html += "<div class=\\"platform-actions\\">";
 
-      // If decrypted or final platform link is available without shortener:
+      // If GDFlix or HubCloud, add Generate Link button in front
+      if (isGdflix || isHubcloud) {
+        var pType = isHubcloud ? "hubcloud" : "gdflix";
+        html += "<button class=\"p-btn-gen\" onclick=\"onGenerateDirectLink(this, '" + safe(targetLink) + "', '" + pType + "')\" title=\"Generate direct Google CDN link\">&#9889; Generate Link</button>";
+      }
+// If decrypted or final platform link is available without shortener:
       if (dest && !dest.includes("/redirect/") && !isAd) {
         html += "<a href=\\"" + safe(dest) + "\\" target=\\"_blank\\" rel=\\"noopener\\" class=\\"p-btn-final\\" title=\\"Direct Platform Download Link\\">&#9889; Direct " + safe(hostName) + " Link &rarr;</a>";
       } else {
@@ -1528,6 +1575,31 @@ function renderEpisodeQualities(data) {
   }
   html += "</div>";
   return html;
+}
+
+function onGenerateDirectLink(btn, url, type) {
+  if (!url) return;
+  btn.disabled = true;
+  var origHtml = btn.innerHTML;
+  btn.innerHTML = "<span class=\"spin\" style=\"display:inline-block;width:10px;height:10px;border-width:2px;vertical-align:middle;margin-right:3px;\"></span> Extracting...";
+
+  fetch(BASE + "/extract-direct?url=" + encodeURIComponent(url) + "&type=" + encodeURIComponent(type))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d && d.ok && d.directUrl) {
+        btn.outerHTML = "<a href=\"" + safe(d.directUrl) + "\" target=\"_blank\" rel=\"noopener\" class=\"p-btn-direct-ready\" title=\"High-Speed Direct Google CDN Link\">&#9889; Direct CDN Link &rarr;</a>" +
+          "<button class=\"p-btn-copy\" onclick=\"copyLink(this, '" + safe(d.directUrl) + "')\" title=\"Copy Direct CDN Link\">&#128203;</button>";
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+        alert("Failed to extract direct link: " + (d && d.error ? d.error : "Unknown error"));
+      }
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+      alert("Network error: " + e.message);
+    });
 }
 
 function copyLink(btn, text) {
@@ -1564,6 +1636,7 @@ window.setupTelegramWebhook = setupTelegramWebhook;
 window.checkWebhookInfo = checkWebhookInfo;
 window.onQuickPostToTelegram = onQuickPostToTelegram;
 window.onPostCardToTelegram = onPostCardToTelegram;
+window.onGenerateDirectLink = onGenerateDirectLink;
 
 window.addEventListener("DOMContentLoaded", attachButtons);
 `;
@@ -1716,6 +1789,10 @@ tr.ck-expired td{opacity:.55}
 .p-btn-final:hover{background:#15803d}
 .p-btn-short{background:#6366f1;color:#fff;text-decoration:none;font-size:11px;font-weight:600;padding:4px 9px;border-radius:4px;white-space:nowrap}
 .p-btn-short:hover{background:#4f46e5}
+.p-btn-gen{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;border:none;border-radius:4px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:3px;transition:all .15s;white-space:nowrap}
+.p-btn-gen:hover{background:#b45309;transform:translateY(-1px)}
+.p-btn-gen:disabled{opacity:.65;cursor:wait;transform:none}
+.p-btn-direct-ready{background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px;box-shadow:0 0 10px rgba(16,185,129,.45);white-space:nowrap}
 .p-btn-copy{background:#334155;color:#fff;border:none;border-radius:4px;padding:4px 7px;cursor:pointer;font-size:11px}
 .p-btn-copy:hover{background:#475569}
 

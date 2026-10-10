@@ -6,7 +6,7 @@
  * and generates the fresh direct download link on demand when the user clicks.
  */
 
-import { extractInstantDownloadLink, escapeHtml } from "./telegram.js";
+import { extractInstantDownloadLink, extractHubcloudDownloadLink, escapeHtml } from "./telegram.js";
 
 /**
  * Main router for public /d/* routes.
@@ -35,7 +35,7 @@ export async function handleDownloadPage(request, env, url) {
     }
   }
 
-  if (!dlInfo || !dlInfo.gdflixUrl) {
+  if (!dlInfo || (!dlInfo.gdflixUrl && !dlInfo.hubcloudUrl)) {
     return errorHtmlResponse(
       "Download Link Expired",
       "This download session has expired or is no longer available. Please choose your episode and quality again in the Telegram bot.",
@@ -47,7 +47,9 @@ export async function handleDownloadPage(request, env, url) {
 
   // 2. Action: Extract direct link on demand (AJAX)
   if (action === "generate" || action === "extract") {
-    const cacheKey = "cache_link:" + dlInfo.gdflixUrl;
+    const primaryUrl = dlInfo.gdflixUrl || dlInfo.hubcloudUrl;
+    const fallbackMirror = dlInfo.gdflixUrl || dlInfo.hubcloudUrl;
+    const cacheKey = "cache_link:" + primaryUrl;
 
     // Fast check: return from KV cache if generated in the last hour
     if (env?.BOT_KV) {
@@ -67,7 +69,14 @@ export async function handleDownloadPage(request, env, url) {
     }
 
     try {
-      const directUrl = await extractInstantDownloadLink(dlInfo.gdflixUrl);
+      let directUrl = null;
+      if (dlInfo.gdflixUrl) {
+        directUrl = await extractInstantDownloadLink(dlInfo.gdflixUrl, dlInfo.hubcloudUrl);
+      }
+      if (!directUrl && dlInfo.hubcloudUrl) {
+        directUrl = await extractHubcloudDownloadLink(dlInfo.hubcloudUrl);
+      }
+
       if (directUrl && /^https?:\/\//i.test(directUrl)) {
         // Cache in KV for 1 hour
         if (env?.BOT_KV) {
@@ -84,13 +93,13 @@ export async function handleDownloadPage(request, env, url) {
 
       return jsonResponse({
         ok: false,
-        fallbackUrl: dlInfo.gdflixUrl,
-        error: "Could not automatically resolve direct Google CDN link. You can open the GDFlix mirror directly.",
+        fallbackUrl: fallbackMirror,
+        error: "Could not automatically resolve direct Google CDN link. You can open the platform mirrors directly.",
       }, 200);
     } catch (err) {
       return jsonResponse({
         ok: false,
-        fallbackUrl: dlInfo.gdflixUrl,
+        fallbackUrl: fallbackMirror,
         error: err.message || "Extraction error",
       }, 500);
     }

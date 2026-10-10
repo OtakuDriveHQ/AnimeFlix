@@ -101,7 +101,28 @@ export async function extractFoxcloudLink(foxcloudUrl) {
 /**
  * High-speed extractor for GDFlix instant download links.
  */
-export async function extractInstantDownloadLink(rawUrl) {
+export async function extractInstantDownloadLink(rawUrl, hubcloudUrl = null) {
+  if (!rawUrl && !hubcloudUrl) return null;
+
+  // If rawUrl is actually a HubCloud link, route directly
+  if (rawUrl && /hubcloud|gamerxyt|sportverse/i.test(rawUrl)) {
+    return await extractHubcloudDownloadLink(rawUrl);
+  }
+
+  if (rawUrl) {
+    const direct = await extractSingleGdflix(rawUrl);
+    if (direct) return direct;
+  }
+
+  if (hubcloudUrl) {
+    console.log("GDFlix extraction failed. Falling back to HubCloud:", hubcloudUrl);
+    return await extractHubcloudDownloadLink(hubcloudUrl);
+  }
+
+  return null;
+}
+
+async function extractSingleGdflix(rawUrl) {
   if (!rawUrl) return null;
 
   // 1. If already Google CDN
@@ -305,11 +326,12 @@ export async function extractInstantDownloadLink(rawUrl) {
     const primary = await followInstantUrl(instantUrl);
     if (primary) return primary;
 
-    return await followRedirectChain(instantUrl);
+    const chainRes = await followRedirectChain(instantUrl);
+    if (chainRes) return chainRes;
   } catch (err) {
-    console.warn("extractInstantDownloadLink error:", err.message);
-    return null;
+    console.warn("extractSingleGdflix error:", err.message);
   }
+  return null;
 }
 
 async function followRedirectChain(startUrl) {
@@ -373,6 +395,170 @@ async function followRedirectChain(startUrl) {
       } catch (e) {}
     }
     break;
+  }
+  return null;
+}
+
+/**
+ * Dedicated multi-hop extractor for HubCloud platform download links:
+ * - Step 1: Open HubCloud landing page -> Find "Generate Direct Download Link" button
+ * - Step 2: Open hubcloud.php intermediate page -> Find "Download [Server : 10Gbps]" button
+ * - Step 3: Follow redirect (to worker or dl.php) -> Extract Google CDN video link from ?link= or #downloadBtn
+ */
+export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
+  if (!hubcloudUrl) return null;
+  if (GOOGLE_RE.test(hubcloudUrl)) return hubcloudUrl.match(GOOGLE_RE)[0];
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // 1. Fetch HubCloud Initial Page
+      const res1 = await fetch(hubcloudUrl, {
+        headers: getBrowserHeaders(hubcloudUrl),
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res1.ok) {
+        console.warn("HubCloud Step 1 returned HTTP", res1.status);
+        if (attempt < retries) continue;
+        return null;
+      }
+      const html1 = await res1.text();
+
+      // Find Step 1 button: "Generate Direct Download Link" or link with "hubcloud.php"
+      let step2Url = null;
+      const re1 = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      let m;
+      while ((m = re1.exec(html1)) !== null) {
+        const href = m[1];
+        const text = m[2];
+        if (/generate\s*direct\s*download\s*link/i.test(text) || /hubcloud\.php/i.test(href)) {
+          step2Url = href;
+          break;
+        }
+      }
+      if (!step2Url) {
+        const mPhp = html1.match(/href=["']([^"']*hubcloud\.php[^"']*)["']/i);
+        if (mPhp) step2Url = mPhp[1];
+      }
+      if (!step2Url) {
+        console.warn("Could not find Step 1 button in HubCloud HTML");
+        if (attempt < retries) continue;
+        return null;
+      }
+
+      step2Url = new URL(step2Url, res1.url).href;
+
+      // 2. Fetch Step 2 (hubcloud.php)
+      const res2 = await fetch(step2Url, {
+        headers: {
+          ...getBrowserHeaders(step2Url),
+          "Referer": res1.url,
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res2.ok) {
+        console.warn("HubCloud Step 2 returned HTTP", res2.status);
+        if (attempt < retries) continue;
+        return null;
+      }
+      const html2 = await res2.text();
+
+      // Find Step 2 button: "Download [Server : 10Gbps]" or "gpdl" or "btn-danger"
+      let step3Url = null;
+      const re2 = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      while ((m = re2.exec(html2)) !== null) {
+        const href = m[1];
+        const text = m[2];
+        if (/download\s*\[server/i.test(text) || /gpdl/i.test(href) || (m[0].includes("btn-danger") && /hubcloud/i.test(href))) {
+          step3Url = href;
+          break;
+        }
+      }
+      if (!step3Url) {
+        const mDanger = html2.match(/<a[^>]+class=["'][^"']*btn-danger[^"']*["'][^>]*href=["']([^"']+)["']/i)
+          || html2.match(/<a[^>]+href=["']([^"']+)["'][^>]*class=["'][^"']*btn-danger[^"']*["']/i);
+        if (mDanger) step3Url = mDanger[1];
+      }
+      if (!step3Url) {
+        console.warn("Could not find Step 2 button in HubCloud HTML");
+        if (attempt < retries) continue;
+        return null;
+      }
+
+      step3Url = new URL(step3Url, res2.url).href;
+
+      // 3. Resolve Step 3 (gpdl link)
+      let targetUrl = step3Url;
+      try {
+        const r3Manual = await fetch(step3Url, {
+          headers: {
+            ...getBrowserHeaders(step3Url),
+            "Referer": res2.url,
+          },
+          redirect: "manual",
+          signal: AbortSignal.timeout(10000),
+        });
+        if ([301, 302, 303, 307, 308].includes(r3Manual.status)) {
+          const loc = r3Manual.headers.get("location");
+          if (loc) {
+            targetUrl = new URL(loc, step3Url).href;
+          }
+        }
+      } catch (e) {}
+
+      if (GOOGLE_RE.test(targetUrl)) {
+        return targetUrl.match(GOOGLE_RE)[0];
+      }
+      try {
+        const paramLink = new URL(targetUrl).searchParams.get("link");
+        if (paramLink && GOOGLE_RE.test(paramLink)) {
+          return paramLink.match(GOOGLE_RE)[0];
+        }
+      } catch (e) {}
+
+      const res3 = await fetch(targetUrl, {
+        headers: {
+          ...getBrowserHeaders(targetUrl),
+          "Referer": step3Url,
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (GOOGLE_RE.test(res3.url)) {
+        return res3.url.match(GOOGLE_RE)[0];
+      }
+      try {
+        const finalParam = new URL(res3.url).searchParams.get("link");
+        if (finalParam && GOOGLE_RE.test(finalParam)) {
+          return finalParam.match(GOOGLE_RE)[0];
+        }
+      } catch (e) {}
+
+      const html3 = await res3.text();
+
+      const mFinal = html3.match(/id=["']downloadBtn["'][^>]*href=["']([^"']+)["']/i)
+        || html3.match(/href=["']([^"']+)["'][^>]*id=["']downloadBtn["']/i)
+        || html3.match(/href=["'](https?:\/\/video-downloads\.googleusercontent\.com\/[^"']+)["']/i)
+        || html3.match(GOOGLE_RE);
+
+      if (mFinal) {
+        const found = mFinal[1] || mFinal[0];
+        if (GOOGLE_RE.test(found)) return found.match(GOOGLE_RE)[0];
+        return found;
+      }
+
+      const mQuery = html3.match(/[?&]link=(https?:\/\/video-downloads\.googleusercontent\.com\/[^"'\s&]+)/i);
+      if (mQuery) return decodeURIComponent(mQuery[1]);
+
+    } catch (err) {
+      if (attempt < retries) {
+        console.warn(`HubCloud attempt ${attempt + 1} error (${err.message}), retrying...`);
+        continue;
+      }
+      console.warn("extractHubcloudDownloadLink error:", err.message);
+    }
   }
   return null;
 }

@@ -374,13 +374,44 @@ export async function extractFoxcloudLink(foxcloudUrl) {
  * @param {string} gdflixUrl
  * @returns {Promise<string|null>}
  */
-export async function extractInstantDownloadLink(gdflixUrl) {
+export async function extractInstantDownloadLink(gdflixUrl, hubcloudUrl = null) {
+  if (!gdflixUrl && !hubcloudUrl) return null;
+
+  if (gdflixUrl && /hubcloud|gamerxyt|sportverse/i.test(gdflixUrl)) {
+    return await extractHubcloudDownloadLink(gdflixUrl);
+  }
+
+  if (gdflixUrl) {
+    const direct = await extractSingleGdflix(gdflixUrl);
+    if (direct) return direct;
+  }
+
+  // Automatic Fallback to HubCloud if GDFlix extraction failed
+  if (hubcloudUrl) {
+    console.log("GDFlix extraction failed. Falling back to HubCloud:", hubcloudUrl);
+    try {
+      const hubRes = await extractHubcloudDownloadLink(hubcloudUrl);
+      if (hubRes) return hubRes;
+    } catch (e) {
+      console.warn("Fallback to HubCloud failed:", e.message);
+    }
+  }
+
+  return null;
+}
+
+async function extractSingleGdflix(gdflixUrl) {
   if (!gdflixUrl) return null;
 
   const GOOGLE_RE = /https?:\/\/video-downloads\.googleusercontent\.com\/[^\s"'<>]+/i;
 
   if (GOOGLE_RE.test(gdflixUrl)) {
     return gdflixUrl.match(GOOGLE_RE)[0];
+  }
+
+  if (gdflixUrl.includes("foxcloud.rest")) {
+    const fox = await extractFoxcloudLink(gdflixUrl);
+    if (fox) return fox;
   }
 
   /** Fast attribute / regex scanner for the instant download URL. */
@@ -578,12 +609,14 @@ export async function extractInstantDownloadLink(gdflixUrl) {
     if (primary) return primary;
 
     // Step 4: Fallback hop-by-hop chain (max 4 hops with 3s timeouts)
-    return await followRedirectChain(instantUrl);
+    const chainRes = await followRedirectChain(instantUrl);
+    if (chainRes) return chainRes;
 
   } catch (err) {
-    console.warn("extractInstantDownloadLink error:", err.message);
-    return null;
+    console.warn("extractSingleGdflix error:", err.message);
   }
+
+  return null;
 }
 
 async function followRedirectChain(startUrl) {
@@ -669,6 +702,182 @@ async function followRedirectChain(startUrl) {
       continue;
     }
     break;
+  }
+  return null;
+}
+
+/**
+ * Dedicated multi-hop extractor for HubCloud platform download links:
+ * - Step 1: Open HubCloud landing page -> Find "Generate Direct Download Link" button
+ * - Step 2: Open hubcloud.php intermediate page -> Find "Download [Server : 10Gbps]" button
+ * - Step 3: Follow redirect (to worker or dl.php) -> Extract Google CDN video link from ?link= or #downloadBtn
+ */
+export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1) {
+  if (!hubcloudUrl) return null;
+  const GOOGLE_RE = /https?:\/\/video-downloads\.googleusercontent\.com\/[^\s"'<>]+/i;
+  const MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
+  const baseHeaders = {
+    "User-Agent": MOBILE_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://new4.gdflix.io/",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+  };
+
+  if (GOOGLE_RE.test(hubcloudUrl)) return hubcloudUrl.match(GOOGLE_RE)[0];
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // 1. Fetch HubCloud Initial Page
+      const res1 = await fetch(hubcloudUrl, {
+        headers: baseHeaders,
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res1.ok) {
+        console.warn("HubCloud Step 1 returned HTTP", res1.status);
+        if (attempt < retries) continue;
+        return null;
+      }
+      const html1 = await res1.text();
+
+      // Find Step 1 button: "Generate Direct Download Link" or link with "hubcloud.php"
+      let step2Url = null;
+      const re1 = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      let m;
+      while ((m = re1.exec(html1)) !== null) {
+        const href = m[1];
+        const text = m[2];
+        if (/generate\s*direct\s*download\s*link/i.test(text) || /hubcloud\.php/i.test(href)) {
+          step2Url = href;
+          break;
+        }
+      }
+      if (!step2Url) {
+        const mPhp = html1.match(/href=["']([^"']*hubcloud\.php[^"']*)["']/i);
+        if (mPhp) step2Url = mPhp[1];
+      }
+      if (!step2Url) {
+        console.warn("Could not find Step 1 button in HubCloud HTML");
+        if (attempt < retries) continue;
+        return null;
+      }
+
+      step2Url = new URL(step2Url, res1.url).href;
+
+      // 2. Fetch Step 2 (hubcloud.php)
+      const res2 = await fetch(step2Url, {
+        headers: {
+          ...baseHeaders,
+          "Referer": res1.url,
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res2.ok) {
+        console.warn("HubCloud Step 2 returned HTTP", res2.status);
+        if (attempt < retries) continue;
+        return null;
+      }
+      const html2 = await res2.text();
+
+      // Find Step 2 button: "Download [Server : 10Gbps]" or "gpdl" or "btn-danger"
+      let step3Url = null;
+      const re2 = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      while ((m = re2.exec(html2)) !== null) {
+        const href = m[1];
+        const text = m[2];
+        if (/download\s*\[server/i.test(text) || /gpdl/i.test(href) || (m[0].includes("btn-danger") && /hubcloud/i.test(href))) {
+          step3Url = href;
+          break;
+        }
+      }
+      if (!step3Url) {
+        const mDanger = html2.match(/<a[^>]+class=["'][^"']*btn-danger[^"']*["'][^>]*href=["']([^"']+)["']/i)
+          || html2.match(/<a[^>]+href=["']([^"']+)["'][^>]*class=["'][^"']*btn-danger[^"']*["']/i);
+        if (mDanger) step3Url = mDanger[1];
+      }
+      if (!step3Url) {
+        console.warn("Could not find Step 2 button in HubCloud HTML");
+        if (attempt < retries) continue;
+        return null;
+      }
+
+      step3Url = new URL(step3Url, res2.url).href;
+
+      // 3. Resolve Step 3 (gpdl link)
+      let targetUrl = step3Url;
+      try {
+        const r3Manual = await fetch(step3Url, {
+          headers: {
+            ...baseHeaders,
+            "Referer": res2.url,
+          },
+          redirect: "manual",
+          signal: AbortSignal.timeout(10000),
+        });
+        if ([301, 302, 303, 307, 308].includes(r3Manual.status)) {
+          const loc = r3Manual.headers.get("location");
+          if (loc) {
+            targetUrl = new URL(loc, step3Url).href;
+          }
+        }
+      } catch (e) {}
+
+      if (GOOGLE_RE.test(targetUrl)) {
+        return targetUrl.match(GOOGLE_RE)[0];
+      }
+      try {
+        const paramLink = new URL(targetUrl).searchParams.get("link");
+        if (paramLink && GOOGLE_RE.test(paramLink)) {
+          return paramLink.match(GOOGLE_RE)[0];
+        }
+      } catch (e) {}
+
+      const res3 = await fetch(targetUrl, {
+        headers: {
+          ...baseHeaders,
+          "Referer": step3Url,
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (GOOGLE_RE.test(res3.url)) {
+        return res3.url.match(GOOGLE_RE)[0];
+      }
+      try {
+        const finalParam = new URL(res3.url).searchParams.get("link");
+        if (finalParam && GOOGLE_RE.test(finalParam)) {
+          return finalParam.match(GOOGLE_RE)[0];
+        }
+      } catch (e) {}
+
+      const html3 = await res3.text();
+
+      const mFinal = html3.match(/id=["']downloadBtn["'][^>]*href=["']([^"']+)["']/i)
+        || html3.match(/href=["']([^"']+)["'][^>]*id=["']downloadBtn["']/i)
+        || html3.match(/href=["'](https?:\/\/video-downloads\.googleusercontent\.com\/[^"']+)["']/i)
+        || html3.match(GOOGLE_RE);
+
+      if (mFinal) {
+        const found = mFinal[1] || mFinal[0];
+        if (GOOGLE_RE.test(found)) return found.match(GOOGLE_RE)[0];
+        return found;
+      }
+
+      const mQuery = html3.match(/[?&]link=(https?:\/\/video-downloads\.googleusercontent\.com\/[^"'\s&]+)/i);
+      if (mQuery) return decodeURIComponent(mQuery[1]);
+
+    } catch (err) {
+      if (attempt < retries) {
+        console.warn(`HubCloud attempt ${attempt + 1} error (${err.message}), retrying...`);
+        continue;
+      }
+      console.warn("extractHubcloudDownloadLink error:", err.message);
+    }
   }
   return null;
 }
@@ -1237,8 +1446,22 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
           }
         }
       }
-      if (!gdflixFile) gdflixFile = files[0] || {};
-      baseGdflixUrl = gdflixFile.finalUrl || gdflixFile.destinationUrl || gdflixFile.redirectUrl || "";
+      baseGdflixUrl = gdflixFile ? (gdflixFile.finalUrl || gdflixFile.destinationUrl || gdflixFile.redirectUrl || "") : "";
+
+      let hubcloudFile = files.find(f => /hubcloud/i.test(f.host) || /hubcloud/i.test(f.finalUrl) || /hubcloud/i.test(f.destinationUrl));
+      if (!hubcloudFile) {
+        for (const f of files) {
+          const raw = f.finalUrl || f.destinationUrl || f.redirectUrl;
+          if (raw && (raw.includes("/redirect/") || /^[a-f0-9]{32,}$/i.test(raw))) {
+            const dec = await decryptRedirectUrl(raw);
+            if (dec && /hubcloud/i.test(dec)) {
+              hubcloudFile = { ...f, finalUrl: dec, destinationUrl: dec };
+              break;
+            }
+          }
+        }
+      }
+      let baseHubcloudUrl = hubcloudFile ? (hubcloudFile.finalUrl || hubcloudFile.destinationUrl || hubcloudFile.redirectUrl || "") : "";
     } else if (episode.links?.[qIdx]) {
       const linkItem = episode.links[qIdx];
       baseGdflixUrl = linkItem.href || "";
@@ -1252,18 +1475,21 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
         if (dec) baseGdflixUrl = dec;
       } catch (e) {}
     }
-
-    // Ensure we target gdflix.dev
-    // Keep original fast mirror domain directly (e.g. new4.gdflix.io) to avoid extra redirect round-trip
+    if (baseHubcloudUrl && (baseHubcloudUrl.includes("/redirect/") || /^[a-f0-9]{32,}$/i.test(baseHubcloudUrl))) {
+      try {
+        const dec = await decryptRedirectUrl(baseHubcloudUrl);
+        if (dec) baseHubcloudUrl = dec;
+      } catch (e) {}
+    }
 
     // Build a worker download page (details + Download button). The final link is generated
     // fresh when the user presses Download on that page.
-    if (!baseGdflixUrl || !/gdflix/i.test(baseGdflixUrl)) {
+    if (!baseGdflixUrl && !baseHubcloudUrl) {
       await editTelegramMessage({
         botToken,
         chatId,
         messageId,
-        text: "⚠️ <b>No GDFlix link is available for this quality.</b>",
+        text: "⚠️ <b>No GDFlix or HubCloud link is available for this quality.</b>",
         replyMarkup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "ep:" + postId + ":" + seasonIdx + ":" + epIdx }]] },
       });
       return;
@@ -1278,6 +1504,7 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
       sz: String(size || "").replace(/^\s*\[|\]\s*$/g, "").trim(),
       th: postData.thumbnail || "",
       u: baseGdflixUrl,
+      hub: baseHubcloudUrl || "",
     };
     const b64Payload = btoa(unescape(encodeURIComponent(JSON.stringify(compactPayload))))
       .replace(/\+/g, "-")

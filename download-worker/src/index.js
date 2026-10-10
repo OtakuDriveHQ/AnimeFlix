@@ -13,7 +13,7 @@
  *  - GET  /health      -> Health check
  */
 
-import { extractInstantDownloadLink, escapeHtml } from "./extractor.js";
+import { extractInstantDownloadLink, extractHubcloudDownloadLink, escapeHtml } from "./extractor.js";
 
 export default {
   async fetch(request, env) {
@@ -77,33 +77,40 @@ async function handleDownloadPage(request, env, url) {
   }
 
   // C. Check POST body if generating
-  if (request.method === "POST" && (!dlInfo || !dlInfo.gdflixUrl)) {
+  let bodyData = null;
+  if (request.method === "POST") {
     try {
-      const body = await request.clone().json().catch(() => ({}));
-      if (body.p) dlInfo = decodePayload(body.p);
-      if (!dlInfo || !dlInfo.gdflixUrl) {
-        if (body.gdflixUrl) {
-          dlInfo = {
-            title: body.title || dlInfo?.title || "Episode",
-            season: body.season || dlInfo?.season || "",
-            episode: body.episode || dlInfo?.episode || "",
-            quality: body.quality || dlInfo?.quality || "HD",
-            size: body.size || dlInfo?.size || "",
-            thumbnail: body.thumbnail || dlInfo?.thumbnail || "",
-            gdflixUrl: body.gdflixUrl,
-          };
-        }
-      }
+      bodyData = await request.clone().json().catch(() => ({}));
+      if (bodyData.p && !dlInfo) dlInfo = decodePayload(bodyData.p);
     } catch (e) {}
+  }
+
+  // C. Check POST body if generating
+  if (!dlInfo || (!dlInfo.gdflixUrl && !dlInfo.hubcloudUrl)) {
+    if (bodyData && (bodyData.gdflixUrl || bodyData.hubcloudUrl)) {
+      dlInfo = {
+        title: bodyData.title || dlInfo?.title || "Episode",
+        season: bodyData.season || dlInfo?.season || "",
+        episode: bodyData.episode || dlInfo?.episode || "",
+        quality: bodyData.quality || dlInfo?.quality || "HD",
+        size: bodyData.size || dlInfo?.size || "",
+        thumbnail: bodyData.thumbnail || dlInfo?.thumbnail || "",
+        gdflixUrl: bodyData.gdflixUrl || dlInfo?.gdflixUrl || "",
+        hubcloudUrl: bodyData.hubcloudUrl || dlInfo?.hubcloudUrl || "",
+      };
+    }
   }
 
   // 2. Action: Extract direct link on demand (AJAX)
   if (action === "generate" || action === "extract" || (request.method === "POST" && (action === "generate" || parts[1] === "generate"))) {
-    if (!dlInfo || !dlInfo.gdflixUrl) {
-      return jsonResponse({ ok: false, error: "Missing GDFlix URL or session data." }, 400);
+    if (!dlInfo || (!dlInfo.gdflixUrl && !dlInfo.hubcloudUrl)) {
+      return jsonResponse({ ok: false, error: "Missing GDFlix or HubCloud URL or session data." }, 400);
     }
 
-    const cacheKey = "cache_link:" + dlInfo.gdflixUrl;
+    const platform = (bodyData?.platform || url.searchParams.get("platform") || "").toLowerCase();
+    const primaryUrl = platform === "hubcloud" ? (dlInfo.hubcloudUrl || dlInfo.gdflixUrl) : (dlInfo.gdflixUrl || dlInfo.hubcloudUrl);
+    const fallbackMirror = dlInfo.gdflixUrl || dlInfo.hubcloudUrl;
+    const cacheKey = "cache_link:" + primaryUrl;
 
     // Fast cache check in KV
     if (env?.DOWNLOAD_KV) {
@@ -123,7 +130,25 @@ async function handleDownloadPage(request, env, url) {
     }
 
     try {
-      const directUrl = await extractInstantDownloadLink(dlInfo.gdflixUrl);
+      let directUrl = null;
+      let usedPlatform = "gdflix";
+
+      if (platform === "hubcloud" && dlInfo.hubcloudUrl) {
+        directUrl = await extractHubcloudDownloadLink(dlInfo.hubcloudUrl);
+        usedPlatform = "hubcloud";
+      } else {
+        // Try GDFlix first
+        if (dlInfo.gdflixUrl) {
+          directUrl = await extractInstantDownloadLink(dlInfo.gdflixUrl, dlInfo.hubcloudUrl);
+          usedPlatform = "gdflix";
+        }
+        // If GDFlix extraction failed or wasn't provided, try HubCloud
+        if (!directUrl && dlInfo.hubcloudUrl) {
+          directUrl = await extractHubcloudDownloadLink(dlInfo.hubcloudUrl);
+          usedPlatform = "hubcloud";
+        }
+      }
+
       if (directUrl && /^https?:\/\//i.test(directUrl)) {
         if (env?.DOWNLOAD_KV) {
           env.DOWNLOAD_KV.put(cacheKey, directUrl, { expirationTtl: 3600 }).catch(() => {});
@@ -134,25 +159,26 @@ async function handleDownloadPage(request, env, url) {
           title: dlInfo.title,
           episode: dlInfo.episode,
           quality: dlInfo.quality,
+          platform: usedPlatform,
         });
       }
 
       return jsonResponse({
         ok: false,
-        fallbackUrl: dlInfo.gdflixUrl,
-        error: "Could not automatically resolve direct Google CDN link. You can open the GDFlix mirror directly.",
+        fallbackUrl: fallbackMirror,
+        error: "Could not automatically resolve direct Google CDN link. You can open the platform mirrors directly.",
       }, 200);
     } catch (err) {
       return jsonResponse({
         ok: false,
-        fallbackUrl: dlInfo.gdflixUrl,
+        fallbackUrl: fallbackMirror,
         error: err.message || "Extraction error",
       }, 500);
     }
   }
 
   // If no info found, show friendly expired page
-  if (!dlInfo || !dlInfo.gdflixUrl) {
+  if (!dlInfo || (!dlInfo.gdflixUrl && !dlInfo.hubcloudUrl)) {
     return errorHtmlResponse(
       "Download Link Expired",
       "This download link is invalid or has expired. Please select your episode and quality again in the Telegram bot.",
@@ -184,6 +210,7 @@ function decodePayload(p) {
       size: data.sz || data.size || "",
       thumbnail: data.th || data.thumbnail || "",
       gdflixUrl: data.u || data.gdflixUrl || "",
+      hubcloudUrl: data.hub || data.hubcloudUrl || "",
     };
   } catch (e) {
     try {
@@ -196,6 +223,7 @@ function decodePayload(p) {
         size: data.sz || data.size || "",
         thumbnail: data.th || data.thumbnail || "",
         gdflixUrl: data.u || data.gdflixUrl || "",
+        hubcloudUrl: data.hub || data.hubcloudUrl || "",
       };
     } catch (e2) {
       return null;
@@ -213,7 +241,8 @@ function renderDownloadHtml(info, origin, stateKey) {
   const quality = escapeHtml(info.quality || "HD");
   const size = escapeHtml(info.size || "");
   const thumbnail = info.thumbnail ? escapeHtml(info.thumbnail) : "";
-  const gdflixUrl = escapeHtml(info.gdflixUrl || "https://gdflix.dev");
+  const gdflixUrl = escapeHtml(info.gdflixUrl || "");
+  const hubcloudUrl = escapeHtml(info.hubcloudUrl || "");
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -505,24 +534,25 @@ function renderDownloadHtml(info, origin, stateKey) {
         </a>
         <div class="actions-grid">
           <button class="btn-secondary" onclick="copyLink()">📋 Copy Link</button>
-          <a class="btn-secondary" href="${gdflixUrl}" target="_blank" rel="noopener">🌐 GDFlix Mirror</a>
+          ${gdflixUrl ? `<a class="btn-secondary" href="${gdflixUrl}" target="_blank" rel="noopener">⚡ GDFlix Mirror</a>` : ''}
+          ${hubcloudUrl ? `<a class="btn-secondary" href="${hubcloudUrl}" target="_blank" rel="noopener">☁️ HubCloud Mirror</a>` : ''}
         </div>
       </div>
 
       <div class="actions-grid" style="margin-top: 1rem;">
-        <a id="btnFallback" class="btn-secondary" href="${gdflixUrl}" target="_blank" rel="noopener" style="display:none; grid-column: 1 / -1;">
-          🌐 Open GDFlix Page Directly
-        </a>
+        ${gdflixUrl ? `<a id="btnFallback" class="btn-secondary" href="${gdflixUrl}" target="_blank" rel="noopener" style="display:none;">🌐 GDFlix Mirror</a>` : ''}
+        ${hubcloudUrl ? `<a id="btnFallbackHub" class="btn-secondary" href="${hubcloudUrl}" target="_blank" rel="noopener" style="display:none;">☁️ HubCloud Mirror</a>` : ''}
       </div>
 
       <div class="footer">
-        Powered by GDFlix Fast Cloud CDN
+        Powered by GDFlix &amp; HubCloud High-Speed Cloud
       </div>
     </div>
   </div>
 
   <script>
-    const gdflixMirrorUrl = ${JSON.stringify(info.gdflixUrl)};
+    const gdflixMirrorUrl = ${JSON.stringify(info.gdflixUrl || "")};
+    const hubcloudMirrorUrl = ${JSON.stringify(info.hubcloudUrl || "")};
     const stateKey = ${JSON.stringify(stateKey)};
     let directDownloadUrl = null;
     let prewarmPromise = null;
@@ -533,7 +563,7 @@ function renderDownloadHtml(info, origin, stateKey) {
       prewarmPromise = fetch("/d/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ p: stateKey, gdflixUrl: gdflixMirrorUrl })
+        body: JSON.stringify({ p: stateKey, gdflixUrl: gdflixMirrorUrl, hubcloudUrl: hubcloudMirrorUrl })
       })
       .then(r => r.json())
       .then(data => {
@@ -546,7 +576,6 @@ function renderDownloadHtml(info, origin, stateKey) {
           }
           return data;
         }
-        // If prewarm failed, clear the promise so generateLink does a fresh fetch
         prewarmPromise = null;
         return null;
       })
@@ -557,7 +586,7 @@ function renderDownloadHtml(info, origin, stateKey) {
     }
     setTimeout(initPrewarm, 100);
 
-    function showSuccess(url) {
+    function showSuccess(url, platform) {
       directDownloadUrl = url;
       const btn = document.getElementById("btnMain");
       const statusBox = document.getElementById("statusBox");
@@ -570,7 +599,8 @@ function renderDownloadHtml(info, origin, stateKey) {
       btn.style.display = "none";
       if (errorBox) errorBox.style.display = "none";
       statusBox.style.display = "block";
-      statusText.innerHTML = "✅ <b>Direct Link Ready!</b>";
+      var tag = platform === "hubcloud" ? " (via HubCloud)" : (platform === "gdflix" ? " (via GDFlix)" : "");
+      statusText.innerHTML = "✅ <b>Direct Link Ready!" + tag + "</b>";
       autoNotice.style.display = "block";
       btnDirect.href = directDownloadUrl;
       successArea.style.display = "block";
@@ -612,21 +642,20 @@ function renderDownloadHtml(info, origin, stateKey) {
           const resp = await fetch("/d/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Accept": "application/json" },
-            body: JSON.stringify({ p: stateKey, gdflixUrl: gdflixMirrorUrl })
+            body: JSON.stringify({ p: stateKey, gdflixUrl: gdflixMirrorUrl, hubcloudUrl: hubcloudMirrorUrl })
           });
           data = await resp.json();
         }
 
         if (data && data.ok && data.directUrl) {
           prewarmResult = data;
-          showSuccess(data.directUrl);
+          showSuccess(data.directUrl, data.platform);
           return;
         }
 
-        throw new Error((data && data.error) || "Could not automatically resolve direct Google CDN link. You can open the GDFlix mirror directly.");
+        throw new Error((data && data.error) || "Could not automatically resolve direct Google CDN link. You can open the platform mirrors directly.");
 
       } catch (err) {
-        // Clear cached promise on error so clicking retry always retries freshly
         prewarmPromise = null;
         prewarmResult = null;
         statusBox.style.display = "none";
@@ -638,6 +667,10 @@ function renderDownloadHtml(info, origin, stateKey) {
         }
         if (btnFallback) {
           btnFallback.style.display = "inline-flex";
+        }
+        var btnFallbackHub = document.getElementById("btnFallbackHub");
+        if (btnFallbackHub) {
+          btnFallbackHub.style.display = "inline-flex";
         }
       }
     }
