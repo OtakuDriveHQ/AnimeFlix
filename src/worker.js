@@ -559,7 +559,21 @@ function updateSavedCounter() {
   }
 }
 
+function setOldCookiesOnOpen() {
+  var sCf = "${cookies.find(c => c.name === 'cf_clearance')?.value || ''}";
+  var sUser = "${cookies.find(c => c.name === 'user')?.value || ''}";
+  if (sCf || sUser) {
+    localStorage.setItem("user_cf_clearance", sCf);
+    localStorage.setItem("user_session_token", sUser);
+    var combined = "";
+    if (sCf) combined += "cf_clearance=" + sCf + "; ";
+    if (sUser) combined += "user=" + sUser;
+    localStorage.setItem("user_24h_cookies", combined.trim());
+  }
+}
+
 function attachButtons() {
+  setOldCookiesOnOpen();
   var btns = document.querySelectorAll(".btn-scrape");
   for (var b = 0; b < btns.length; b++) {
     btns[b].addEventListener("click", onScrapeClick);
@@ -646,10 +660,10 @@ function updateCustomCookieStatus() {
   var expInput = document.getElementById("input-expiry");
 
   if (cfInput) {
-    cfInput.value = storedCf || "9qFeSQq3tOasqys6dP3JNEq2wcyYsFOsRh6tRN.4GNQ-1790924127-1.2.1.1-akktr571CM.LBXE.lYiB6mqPm4dgrotcZ657ys_CTBSluQmHswBxfxXmiO1ywpx3ka2EorPvwbeQHWWX.RAxi5tv.R7FrYeiTpEPuZJ37H8dbKmNoRXhpG8uxpoGuL3R2.34vEcZkR.dSytbFv8MPLr7ZS_PfNFgCkfLna2LDBhxtq08xKs.Rwh0SKQqoZo2fbe4tLEnAcFjuqbMcgqPXmY34ScVkWl1_6Jci_OHS7gwNwd9Y0mlRQ.SWT7pkgDvQN1YNls9bA4PQgOab0qNlOCNn_KXuS98gNj3PAlymr6xTu5wq4XiI3pknnY3DxfCaGtsSuBuyuSj4GtRq.cVNxkfjVNMt9bQ_fg.nGzA2Dw";
+    cfInput.value = storedCf || "${cookies.find(c => c.name === 'cf_clearance')?.value || ''}";
   }
   if (userInput) {
-    userInput.value = storedUser || "12091892a567774b7ae554ef97b9d3f561422acbb7d51a805a6f4043ce5d32906e3183dc3e80817cb9367dace72ac756aa8d753502cb398ab471c5eb6941101febd124120ecd6e24310aeb40dc405324b87492b7a01bac5e83f92aed9783ba21c93a10bdb364cb66046132e18dc344cb915427e5be0f0fb6f2ccfee9a226795ec10d6ece4d658a8c4677e24f5eb96deb99ca56f4a4ef608b5add3520cf16301142d678fdc2a753914038494d2e18ad2d20fa895018b5ffc663302c19a1289d738e9f5a452fa74d9cfbd71a8a5899ffd87d846f6742ad71a2648f0853b0d6836d04976dd47a1c737e69683b1f7bdc3c52a456b0449a35aad9f420614e79ad2e5846d823f37d6859aadae51ca417003eb39d21efef983b7693933082b065e959c890f30dea6fe6a11494a5de7014bca56b024304e821f0e77d8452ae3758d608448812396d2e5fa3848abacc48194e56ffb93445b62efba24201ac2f6b2be9c73f548e67ab8eb393c61f90b811700a89dcfa20a25910d070d56c304248b9403f1eea4227d5566fb62c45bb7d2c8f773e204265df51cea61184eacf2662d9e857e5c49fb37fb8996bac7b67c8025a16d872ffeb2bd12929828373e8df873aac348d9b1467b1415e308ecc548af5a8eb00dc4466d63073e8a66cd6ad97ddc837e90115a200fbd4a321c87ac10f569b6447678852369f372045e48201abbf992409aa33f60b6945bd88b172552c9220c2134cd54efbc21da431bbc752858038a8675b7a3213a86a2163731d3fe3564cfecfd26d8da4aff5121861e9fbd8032c4b663adb1e9c421916af8e5197fcf2569cad685712776bb90414bdbaeb0037f2b703";
+    userInput.value = storedUser || "${cookies.find(c => c.name === 'user')?.value || ''}";
   }
   if (expInput) {
     expInput.value = storedExp;
