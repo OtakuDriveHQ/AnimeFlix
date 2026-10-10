@@ -1428,6 +1428,7 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
 
     let quality = epData?.qualities?.[qIdx];
     let baseGdflixUrl = "";
+    let baseHubcloudUrl = "";
     let res = "HD";
     let size = "";
 
@@ -1463,7 +1464,7 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
           }
         }
       }
-      let baseHubcloudUrl = hubcloudFile ? (hubcloudFile.finalUrl || hubcloudFile.destinationUrl || hubcloudFile.redirectUrl || "") : "";
+      baseHubcloudUrl = hubcloudFile ? (hubcloudFile.finalUrl || hubcloudFile.destinationUrl || hubcloudFile.redirectUrl || "") : "";
     } else if (episode.links?.[qIdx]) {
       const linkItem = episode.links[qIdx];
       baseGdflixUrl = linkItem.href || "";
