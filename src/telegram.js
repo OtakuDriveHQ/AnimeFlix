@@ -29,12 +29,19 @@ export function escapeHtml(str) {
 
 // ─── Configuration Helpers ───────────────────────────────────────────────────
 
+export const DEFAULT_TELEGRAM_BOT_TOKEN = "8886391655:AAGzveDdUEtAmPe08Ym-C1k7mZXaQ70iwgM";
+export const DEFAULT_TELEGRAM_CHAT_ID = "@OtakuDriveHQ";
+export const DEFAULT_TELEGRAM_BOT_USERNAME = "OtakuDriveBot";
+
 export async function getBotToken(env) {
   if (env?.BOT_KV) {
     const val = await env.BOT_KV.get("tg_bot_token");
     if (val && val.trim()) return val.trim();
   }
-  return env?.TELEGRAM_BOT_TOKEN ? env.TELEGRAM_BOT_TOKEN.trim() : "";
+  if (env?.TELEGRAM_BOT_TOKEN && env.TELEGRAM_BOT_TOKEN.trim()) {
+    return env.TELEGRAM_BOT_TOKEN.trim();
+  }
+  return DEFAULT_TELEGRAM_BOT_TOKEN;
 }
 
 export async function getChatId(env) {
@@ -42,7 +49,10 @@ export async function getChatId(env) {
     const val = await env.BOT_KV.get("tg_chat_id");
     if (val && val.trim()) return val.trim();
   }
-  return env?.TELEGRAM_CHAT_ID ? env.TELEGRAM_CHAT_ID.trim() : "";
+  if (env?.TELEGRAM_CHAT_ID && env.TELEGRAM_CHAT_ID.trim()) {
+    return env.TELEGRAM_CHAT_ID.trim();
+  }
+  return DEFAULT_TELEGRAM_CHAT_ID;
 }
 
 export async function getBotUsername(env, botToken) {
@@ -50,7 +60,7 @@ export async function getBotUsername(env, botToken) {
     const val = await env.BOT_KV.get("tg_bot_username");
     if (val && val.trim()) return val.trim().replace(/^@/, "");
   }
-  if (env?.TELEGRAM_BOT_USERNAME) {
+  if (env?.TELEGRAM_BOT_USERNAME && env.TELEGRAM_BOT_USERNAME.trim()) {
     return env.TELEGRAM_BOT_USERNAME.trim().replace(/^@/, "");
   }
   if (botToken) {
@@ -68,7 +78,7 @@ export async function getBotUsername(env, botToken) {
       console.warn("getMe failed:", e.message);
     }
   }
-  return "";
+  return DEFAULT_TELEGRAM_BOT_USERNAME;
 }
 
 export async function saveTelegramConfig(env, { botToken, chatId, botUsername }) {

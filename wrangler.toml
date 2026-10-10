@@ -8,6 +8,9 @@ TARGET_URL = "https://gdflix.io"
 AUTH_USERNAME = "admin9122"
 AUTH_PASSWORD = "Harry@2026#"
 DOWNLOAD_WORKER_URL = "https://downloads.otakudrivehq.workers.dev"
+TELEGRAM_BOT_TOKEN = "8886391655:AAGzveDdUEtAmPe08Ym-C1k7mZXaQ70iwgM"
+TELEGRAM_CHAT_ID = "@OtakuDriveHQ"
+TELEGRAM_BOT_USERNAME = "OtakuDriveBot"
 
 [[kv_namespaces]]
 binding = "BOT_KV"

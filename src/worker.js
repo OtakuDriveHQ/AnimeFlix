@@ -221,8 +221,8 @@ async function handleTelegramSend(request, env) {
   if (request.method !== "POST") return errorResponse(405, "Method not allowed. Use POST.");
   try {
     const body = await request.json();
-    const botToken = body.botToken || env?.TELEGRAM_BOT_TOKEN;
-    const chatId = body.chatId || env?.TELEGRAM_CHAT_ID;
+    const botToken = body.botToken || await getBotToken(env);
+    const chatId = body.chatId || await getChatId(env);
     if (!botToken || !chatId) {
       return errorResponse(400, "Missing Telegram Bot Token or Chat ID. Please configure it in Telegram Bot Setup.");
     }
@@ -1021,9 +1021,9 @@ function onDownloadTxtLinks(detId) {
 
 function getTelegramConfig() {
   return {
-    botToken: (localStorage.getItem("tg_bot_token") || "").trim(),
-    chatId: (localStorage.getItem("tg_chat_id") || "").trim(),
-    botUsername: (localStorage.getItem("tg_bot_username") || "").trim().replace(/^@/, "")
+    botToken: (localStorage.getItem("tg_bot_token") || "8886391655:AAGzveDdUEtAmPe08Ym-C1k7mZXaQ70iwgM").trim(),
+    chatId: (localStorage.getItem("tg_chat_id") || "@OtakuDriveHQ").trim(),
+    botUsername: (localStorage.getItem("tg_bot_username") || "OtakuDriveBot").trim().replace(/^@/, "")
   };
 }
 
@@ -1819,7 +1819,7 @@ tr.ck-expired td{opacity:.55}
     <button class="btn-custom-ck" onclick="var d=document.getElementById('custom-ck-drawer');d.classList.toggle('open');">🍪 Update 24h Session Cookies</button>
     <span id="custom-cookie-badge" class="badge-default">Default Cookies</span>
     <button class="btn-custom-ck" style="background:#0284c7;" onclick="var d=document.getElementById('tg-drawer');d.classList.toggle('open');">✈️ Telegram Bot Setup</button>
-    <span id="tg-status-badge" class="badge-default">Telegram: Not Configured</span>
+    <span id="tg-status-badge" class="badge-active">Telegram: @OtakuDriveHQ (@OtakuDriveBot) ✅</span>
     <button id="btn-clear-cache" class="btn-clear-cache" onclick="clearAllSavedData()" style="display:none;">🗑️ Clear Saved Data (0)</button>
     <a href="/logout" class="btn-custom-ck" style="background:#dc2626;text-decoration:none;margin-left:auto;">🚪 Logout</a>
   </div>
@@ -1830,16 +1830,16 @@ tr.ck-expired td{opacity:.55}
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">
       <div>
         <label style="font-size:11px;font-weight:700;color:#38bdf8;display:block;margin-bottom:3px;">1. Telegram Bot Token (from @BotFather)</label>
-        <input type="text" id="input-tg-bot-token" style="width:100%;background:#10101c;border:1px solid #2d2d45;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:11px;" placeholder="e.g. 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ" />
+        <input type="text" id="input-tg-bot-token" style="width:100%;background:#10101c;border:1px solid #2d2d45;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:11px;" value="8886391655:AAGzveDdUEtAmPe08Ym-C1k7mZXaQ70iwgM" placeholder="e.g. 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ" />
       </div>
       <div>
         <label style="font-size:11px;font-weight:700;color:#38bdf8;display:block;margin-bottom:3px;">2. Target Channel / Chat ID</label>
-        <input type="text" id="input-tg-chat-id" style="width:100%;background:#10101c;border:1px solid #2d2d45;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:11px;" placeholder="e.g. @MyChannel or -1001234567890" />
+        <input type="text" id="input-tg-chat-id" style="width:100%;background:#10101c;border:1px solid #2d2d45;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:11px;" value="@OtakuDriveHQ" placeholder="e.g. @MyChannel or -1001234567890" />
       </div>
       <div>
         <label style="font-size:11px;font-weight:700;color:#38bdf8;display:block;margin-bottom:3px;">3. Bot Username (for Season deep-link buttons)</label>
         <div style="display:flex;gap:6px;">
-          <input type="text" id="input-tg-bot-username" style="flex:1;background:#10101c;border:1px solid #2d2d45;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:11px;" placeholder="e.g. @MyGdflixBot" />
+          <input type="text" id="input-tg-bot-username" style="flex:1;background:#10101c;border:1px solid #2d2d45;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:11px;" value="@OtakuDriveBot" placeholder="e.g. @MyGdflixBot" />
           <button class="btn-custom-ck" style="background:#4f46e5;white-space:nowrap;" onclick="autoDetectBotUsername(this)">🔍 Auto-Detect</button>
         </div>
       </div>
