@@ -1577,7 +1577,7 @@ function renderEpisodeQualities(data) {
       // If GDFlix or HubCloud, add Generate Link button in front
       if (isGdflix || isHubcloud) {
         var pType = isHubcloud ? "hubcloud" : "gdflix";
-        html += "<button class=\"p-btn-gen\" onclick=\"onGenerateDirectLink(this, '" + safe(targetLink) + "', '" + pType + "')\" title=\"Generate direct Google CDN link\">&#9889; Generate Link</button>";
+        html += "<button class=\\"p-btn-gen\\" onclick=\\"onGenerateDirectLink(this, '" + safe(targetLink) + "', '" + pType + "')\\" title=\\"Generate direct Google CDN link\\">&#9889; Generate Link</button>";
       }
 // If decrypted or final platform link is available without shortener:
       if (dest && !dest.includes("/redirect/") && !isAd) {
@@ -1601,21 +1601,21 @@ function onGenerateDirectLink(btn, url, type) {
   if (!url) return;
   btn.disabled = true;
   var origHtml = btn.innerHTML;
-  btn.innerHTML = "<span class=\"spin\" style=\"display:inline-block;width:10px;height:10px;border-width:2px;vertical-align:middle;margin-right:3px;\"></span> Extracting...";
+  btn.innerHTML = "<span class=\\"spin\\" style=\\"display:inline-block;width:10px;height:10px;border-width:2px;vertical-align:middle;margin-right:3px;\\"></span> Extracting...";
 
   fetch(BASE + "/extract-direct?url=" + encodeURIComponent(url) + "&type=" + encodeURIComponent(type))
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d && d.ok && d.directUrl) {
-        btn.outerHTML = "<a href=\"" + safe(d.directUrl) + "\" target=\"_blank\" rel=\"noopener\" class=\"p-btn-direct-ready\" title=\"High-Speed Direct Google CDN Link\">&#9889; Direct CDN Link &rarr;</a>" +
-          "<button class=\"p-btn-copy\" onclick=\"copyLink(this, '" + safe(d.directUrl) + "')\" title=\"Copy Direct CDN Link\">&#128203;</button>";
+        btn.outerHTML = "<a href=\\"" + safe(d.directUrl) + "\\" target=\\"_blank\\" rel=\\"noopener\\" class=\\"p-btn-direct-ready\\" title=\\"High-Speed Direct Google CDN Link\\">&#9889; Direct CDN Link &rarr;</a>" +
+          "<button class=\\"p-btn-copy\\" onclick=\\"copyLink(this, '" + safe(d.directUrl) + "')\\" title=\\"Copy Direct CDN Link\\">&#128203;</button>";
       } else {
         btn.disabled = false;
         btn.innerHTML = origHtml;
-        var msg = "Could not automatically resolve direct Google CDN link (" + (d && d.error ? d.error : "WAF challenge") + ").\n\nWould you like to open the " + (type === "hubcloud" ? "HubCloud" : "platform") + " page directly?";
+        var msg = "Could not automatically resolve direct Google CDN link (" + (d && d.error ? d.error : "WAF challenge") + ").\\n\\nWould you like to open the " + (type === "hubcloud" ? "HubCloud" : "platform") + " page directly?";
         if (confirm(msg)) {
           window.open(url, "_blank");
-          btn.outerHTML = "<a href=\"" + safe(url) + "\" target=\"_blank\" rel=\"noopener\" class=\"p-btn-final\" style=\"background:#dc2626;\" title=\"Open Platform Direct Link\">&#9889; Open " + (type === "hubcloud" ? "HubCloud" : "Direct") + " &rarr;</a>";
+          btn.outerHTML = "<a href=\\"" + safe(url) + "\\" target=\\"_blank\\" rel=\\"noopener\\" class=\\"p-btn-final\\" style=\\"background:#dc2626;\\" title=\\"Open Platform Direct Link\\">&#9889; Open " + (type === "hubcloud" ? "HubCloud" : "Direct") + " &rarr;</a>";
         }
       }
     })
