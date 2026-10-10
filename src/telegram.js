@@ -1526,6 +1526,18 @@ async function handleCallbackQuery(cbQuery, env, botToken) {
       dlWorkerOrigin = env.DOWNLOAD_WORKER_URL;
     }
     if (!dlWorkerOrigin) {
+      try {
+        const u = new URL(request.url);
+        if (u.hostname.includes(".workers.dev")) {
+          const parts = u.hostname.split(".");
+          parts[0] = "downloads"; // assume download worker is named "downloads"
+          dlWorkerOrigin = "https://" + parts.join(".");
+        } else {
+          dlWorkerOrigin = u.origin;
+        }
+      } catch (e) {}
+    }
+    if (!dlWorkerOrigin) {
       dlWorkerOrigin = "https://downloads.otakudrivehq.workers.dev";
     }
 
