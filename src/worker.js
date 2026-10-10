@@ -1598,13 +1598,19 @@ function onGenerateDirectLink(btn, url, type) {
       } else {
         btn.disabled = false;
         btn.innerHTML = origHtml;
-        alert("Failed to extract direct link: " + (d && d.error ? d.error : "Unknown error"));
+        var msg = "Could not automatically resolve direct Google CDN link (" + (d && d.error ? d.error : "WAF challenge") + ").\n\nWould you like to open the " + (type === "hubcloud" ? "HubCloud" : "platform") + " page directly?";
+        if (confirm(msg)) {
+          window.open(url, "_blank");
+          btn.outerHTML = "<a href=\"" + safe(url) + "\" target=\"_blank\" rel=\"noopener\" class=\"p-btn-final\" style=\"background:#dc2626;\" title=\"Open Platform Direct Link\">&#9889; Open " + (type === "hubcloud" ? "HubCloud" : "Direct") + " &rarr;</a>";
+        }
       }
     })
     .catch(function(e) {
       btn.disabled = false;
       btn.innerHTML = origHtml;
-      alert("Network error: " + e.message);
+      if (confirm("Network error: " + e.message + "\n\nWould you like to open the page directly?")) {
+        window.open(url, "_blank");
+      }
     });
 }
 
