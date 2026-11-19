@@ -28,6 +28,7 @@ import {
   deleteSavedLogo,
   normalizeShowKey,
   extractShowIdentificationQuery,
+  generateSearchCandidates,
 } from './storage.js';
 
 const CORS_HEADERS = {
@@ -507,15 +508,30 @@ export default {
           }
         }
 
-        // Not saved yet: auto search with first 3-4 words identification
-        let result = await searchAndGetLogos(searchTitle);
-        if ((!result.logos?.logos || result.logos.logos.length === 0) && searchTitle !== rawShowName) {
-          const fallback = await searchAndGetLogos(rawShowName);
-          if (fallback.logos?.logos?.length > 0) result = fallback;
+        // Not saved yet: auto search using clean candidates (symbols removed)
+        const candidates = generateSearchCandidates(rawShowName);
+        let result = null;
+        let matchedTitle = candidates[0];
+
+        for (const candidate of candidates) {
+          const attempt = await searchAndGetLogos(candidate);
+          if (attempt.logos?.logos?.length > 0) {
+            result = attempt;
+            matchedTitle = candidate;
+            break;
+          }
+          if (!result && attempt.selected_result) {
+            result = attempt;
+            matchedTitle = candidate;
+          }
+        }
+
+        if (!result) {
+          result = await searchAndGetLogos(candidates[0]);
         }
 
         if (result.logos?.logos?.length > 0) {
-          const saved = await saveShowLogos(env, result.selected_result?.name || searchTitle, {
+          const saved = await saveShowLogos(env, result.selected_result?.name || matchedTitle, {
             logos: result.logos.logos,
             tvdbId: result.selected_result?.tvdb_id,
           });
@@ -525,7 +541,7 @@ export default {
             saved: true,
             cached: false,
             ...saved,
-            search_query_used: searchTitle,
+            search_query_used: matchedTitle,
             available_count: result.logos.logos.length,
           });
         }
@@ -533,8 +549,9 @@ export default {
         return jsonResponse({
           success: false,
           saved: false,
-          message: `No transparent logos found for "${searchTitle}"`,
-          search_query_used: searchTitle,
+          message: `No transparent logos found for "${matchedTitle}"`,
+          search_query_used: matchedTitle,
+          candidates_tried: candidates,
           result,
         }, 404);
       }
@@ -587,16 +604,32 @@ export default {
           }
         }
 
-        let result = await searchAndGetLogos(searchTitle);
-        if ((!result.logos?.logos || result.logos.logos.length === 0) && searchTitle !== query) {
-          const fallback = await searchAndGetLogos(query);
-          if (fallback.logos?.logos?.length > 0) result = fallback;
+        // Auto search using clean candidates (symbols removed)
+        const candidates = generateSearchCandidates(query);
+        let result = null;
+        let matchedTitle = candidates[0];
+
+        for (const candidate of candidates) {
+          const attempt = await searchAndGetLogos(candidate);
+          if (attempt.logos?.logos?.length > 0) {
+            result = attempt;
+            matchedTitle = candidate;
+            break;
+          }
+          if (!result && attempt.selected_result) {
+            result = attempt;
+            matchedTitle = candidate;
+          }
+        }
+
+        if (!result) {
+          result = await searchAndGetLogos(candidates[0]);
         }
 
         let saved = null;
         if (result.logos?.logos?.length > 0) {
           // Save ALL logos, defaulting main logo to the first logo
-          saved = await saveShowLogos(env, result.selected_result?.name || searchTitle, {
+          saved = await saveShowLogos(env, result.selected_result?.name || matchedTitle, {
             logos: result.logos.logos,
             tvdbId: result.selected_result?.tvdb_id,
           });
@@ -604,7 +637,8 @@ export default {
 
         return jsonResponse({
           ...result,
-          search_query_used: searchTitle,
+          search_query_used: matchedTitle,
+          candidates_tried: candidates,
           saved: !!saved,
           saved_logo: saved,
           main_logo: saved?.main_logo || null,

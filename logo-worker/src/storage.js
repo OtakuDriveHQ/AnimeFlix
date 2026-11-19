@@ -27,12 +27,23 @@ export function normalizeShowKey(name) {
 }
 
 /**
+ * Remove any punctuation, symbols, colons, slashes, brackets, hyphens etc.
+ */
+export function removeAdditionalSymbols(str) {
+  if (!str) return '';
+  return str
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Extract clean show name from title according to two primary patterns:
  * Pattern 1 (TV/Series): "show name season 1 and suffix words"
  *   -> Extracts the show name that appears BEFORE "season 1" (or "season", "s1", "seacon", etc.)
  * Pattern 2 (Movies): "show name (year) and suffix words"
  *   -> Extracts the show name that appears BEFORE "(year)" (or "[year]" or standalone 4-digit year)
- * Fallback: Cleans slug hyphens/underscores and strips trailing release/quality/audio tags.
+ * Cleans all additional symbols/punctuation from title for accurate search.
  */
 export function extractShowIdentificationQuery(raw) {
   if (!raw) return '';
@@ -52,17 +63,45 @@ export function extractShowIdentificationQuery(raw) {
     }
   }
 
-  // 3. Clean trailing punctuation (colons, hyphens, dashes, brackets, commas, periods)
-  text = text.replace(/[:;\-–—/\\,.!?[\](){}]+$/g, '').trim();
-
-  // 4. Strip common trailing release/quality/audio noise if present
+  // 3. Strip common trailing release/quality/audio noise
   text = text.replace(/\b(download|watch online|dual audio|multi audio|hindi dub|hindi|english|japanese|1080p|720p|480p|4k|2160p|hevc|web-dl|webrip|bluray|bd|remux|x264|x265|10bit|uncut|remastered|batch|full)\b/gi, '').trim();
 
-  // 5. Clean trailing punctuation again and normalize spaces
-  text = text.replace(/[:;\-–—/\\,.!?[\](){}]+$/g, '').trim();
-  text = text.replace(/\s+/g, ' ').trim();
+  // 4. Remove all additional symbols and punctuation
+  text = removeAdditionalSymbols(text);
 
   return text || raw;
+}
+
+/**
+ * Generate smart search candidate variants if a title has colons/subtitles or is long
+ */
+export function generateSearchCandidates(raw) {
+  const cleanFull = extractShowIdentificationQuery(raw);
+  const candidates = [cleanFull];
+
+  // If raw has colon/hyphen separating a primary title and subtitle (e.g. "Demon Slayer: Kimetsu no Yaiba")
+  if (raw.includes(':') || raw.includes(' - ')) {
+    const primaryPart = raw.split(/[:–—]|(\s-\s)/)[0];
+    const cleanPrimary = extractShowIdentificationQuery(primaryPart);
+    if (cleanPrimary && cleanPrimary !== cleanFull && cleanPrimary.length >= 3 && !candidates.includes(cleanPrimary)) {
+      candidates.push(cleanPrimary);
+    }
+  }
+
+  // If clean title has more than 4 words, add 3-4 word prefix fallback (e.g. "Buzz Lightyear of Star Command")
+  const words = cleanFull.split(' ').filter(Boolean);
+  if (words.length > 4) {
+    const fourWords = words.slice(0, 4).join(' ');
+    if (fourWords && !candidates.includes(fourWords)) {
+      candidates.push(fourWords);
+    }
+    const fiveWords = words.slice(0, 5).join(' ');
+    if (fiveWords && !candidates.includes(fiveWords)) {
+      candidates.push(fiveWords);
+    }
+  }
+
+  return candidates;
 }
 
 /**
