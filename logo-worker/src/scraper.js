@@ -468,10 +468,25 @@ async function searchAndGetLogos(query) {
 
   let isMovie = false;
 
-  // 2. If no TV shows found, search movies via Cinemeta
-  if (searchResults.length === 0) {
-    searchResults = await searchMoviesCinemeta(query);
-    if (searchResults.length > 0) isMovie = true;
+  // Check if TVmaze found a high-confidence match
+  const cleanQ = query.toLowerCase().trim();
+  const isExactTvMatch = searchResults.length > 0 &&
+    (searchResults[0].name.toLowerCase() === cleanQ ||
+     searchResults[0].name.toLowerCase().startsWith(cleanQ) ||
+     searchResults[0].score >= 0.9);
+
+  // 2. If no exact/high-confidence TV match, search movies via Cinemeta
+  if (!isExactTvMatch) {
+    const movieResults = await searchMoviesCinemeta(query);
+    if (movieResults.length > 0) {
+      const topMovie = movieResults[0];
+      const isMovieExact = topMovie.name.toLowerCase() === cleanQ || topMovie.name.toLowerCase().startsWith(cleanQ);
+      // Prioritize movie if TV had 0 results or movie is a closer title match
+      if (searchResults.length === 0 || isMovieExact || searchResults[0].score < 0.5) {
+        searchResults = movieResults;
+        isMovie = true;
+      }
+    }
   }
 
   if (searchResults.length === 0) {
