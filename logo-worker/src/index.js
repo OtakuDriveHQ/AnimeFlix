@@ -22,9 +22,12 @@ import {
 import {
   getSavedLogo,
   saveLogo,
+  saveShowLogos,
+  setMainLogo,
   getAllSavedLogos,
   deleteSavedLogo,
   normalizeShowKey,
+  extractShowIdentificationQuery,
 } from './storage.js';
 
 const CORS_HEADERS = {
@@ -441,7 +444,7 @@ export default {
         });
       }
 
-      // API: Get, save, or delete a single show logo
+      // API: Get, save, change main, or delete a single show logo
       if (path === '/api/logo') {
         // DELETE logo
         if (request.method === 'DELETE') {
@@ -451,54 +454,78 @@ export default {
           return jsonResponse({ success, message: `Deleted logo for ${showName}` });
         }
 
-        // POST /api/logo (manual save)
+        // POST /api/logo (manual save or set main logo)
         if (request.method === 'POST') {
           try {
             const body = await request.json();
             const showName = body.show || body.name || body.title;
-            const logoUrl = body.logo_url || body.logoUrl || body.url;
+            const logoUrl = body.logo_url || body.logoUrl || body.main_logo || body.url;
             if (!showName || !logoUrl) {
               return errorResponse('Missing required fields: show and logo_url');
             }
 
-            const saved = await saveLogo(env, showName, {
-              full_url: logoUrl,
-              preview_url: body.preview_url || body.previewUrl || logoUrl,
-              tvdb_id: body.tvdb_id || body.tvdbId || null,
-              filename: body.filename || null,
+            const updated = await setMainLogo(env, showName, logoUrl);
+            return jsonResponse({
+              success: true,
+              saved: updated,
+              main_logo: updated.main_logo,
+              all_logos: updated.logos || [],
             });
-
-            return jsonResponse({ success: true, saved });
           } catch (err) {
             return errorResponse(`Invalid JSON payload: ${err.message}`, 400);
           }
         }
 
-        // GET /api/logo (fetch saved or auto-fetch & save first logo)
-        const showName = url.searchParams.get('show') || url.searchParams.get('q') || url.searchParams.get('name');
-        if (!showName) return errorResponse('Missing show parameter');
+        // GET /api/logo
+        const rawShowName = url.searchParams.get('show') || url.searchParams.get('q') || url.searchParams.get('name');
+        if (!rawShowName) return errorResponse('Missing show parameter');
+
+        // Check if user is requesting to set a new main logo via GET param
+        const setMainUrl = url.searchParams.get('set_main') || url.searchParams.get('main');
+        if (setMainUrl) {
+          const updated = await setMainLogo(env, rawShowName, setMainUrl);
+          return jsonResponse({
+            success: true,
+            updated,
+            main_logo: updated.main_logo,
+            all_logos: updated.logos || [],
+          });
+        }
+
         const force = url.searchParams.get('force') === 'true';
+        const searchTitle = extractShowIdentificationQuery(rawShowName);
 
         if (!force) {
-          const existing = await getSavedLogo(env, showName);
+          const existing = (await getSavedLogo(env, rawShowName)) || (await getSavedLogo(env, searchTitle));
           if (existing) {
-            return jsonResponse({ success: true, saved: true, cached: true, ...existing });
+            return jsonResponse({
+              success: true,
+              saved: true,
+              cached: true,
+              ...existing,
+            });
           }
         }
 
-        // Not saved yet: auto search and get logos
-        const result = await searchAndGetLogos(showName);
+        // Not saved yet: auto search with first 3-4 words identification
+        let result = await searchAndGetLogos(searchTitle);
+        if ((!result.logos?.logos || result.logos.logos.length === 0) && searchTitle !== rawShowName) {
+          const fallback = await searchAndGetLogos(rawShowName);
+          if (fallback.logos?.logos?.length > 0) result = fallback;
+        }
+
         if (result.logos?.logos?.length > 0) {
-          const firstLogo = result.logos.logos[0];
-          const saved = await saveLogo(env, result.selected_result?.name || showName, {
-            ...firstLogo,
-            tvdb_id: result.selected_result?.tvdb_id,
+          const saved = await saveShowLogos(env, result.selected_result?.name || searchTitle, {
+            logos: result.logos.logos,
+            tvdbId: result.selected_result?.tvdb_id,
           });
+
           return jsonResponse({
             success: true,
             saved: true,
             cached: false,
             ...saved,
+            search_query_used: searchTitle,
             available_count: result.logos.logos.length,
           });
         }
@@ -506,69 +533,83 @@ export default {
         return jsonResponse({
           success: false,
           saved: false,
-          message: `No transparent logos found for "${showName}"`,
+          message: `No transparent logos found for "${searchTitle}"`,
+          search_query_used: searchTitle,
           result,
         }, 404);
       }
 
-      // API: Save logo explicitly (POST)
-      if (path === '/api/save' && request.method === 'POST') {
+      // API: Save / Switch main logo explicitly (POST)
+      if ((path === '/api/save' || path === '/api/logo/main') && request.method === 'POST') {
         try {
           const body = await request.json();
           const showName = body.show || body.name || body.title;
-          const logoUrl = body.logo_url || body.logoUrl || body.url;
+          const logoUrl = body.logo_url || body.logoUrl || body.main_logo || body.url;
           if (!showName || !logoUrl) {
             return errorResponse('Missing required fields: show and logo_url');
           }
 
-          const saved = await saveLogo(env, showName, {
-            full_url: logoUrl,
-            preview_url: body.preview_url || body.previewUrl || logoUrl,
-            tvdb_id: body.tvdb_id || body.tvdbId || null,
-            filename: body.filename || null,
+          const updated = await setMainLogo(env, showName, logoUrl);
+          return jsonResponse({
+            success: true,
+            saved: updated,
+            main_logo: updated.main_logo,
+            all_logos: updated.logos || [],
           });
-
-          return jsonResponse({ success: true, saved });
         } catch (err) {
           return errorResponse(`Invalid JSON payload: ${err.message}`, 400);
         }
       }
 
-      // API: Auto search + fetch logos & automatically save first logo
+      // API: Auto search + fetch logos using first 3-4 words & save all logos (first as main)
       if (path === '/api/auto') {
         const query = url.searchParams.get('q');
         if (!query) return errorResponse('Missing query parameter: q');
         const force = url.searchParams.get('force') === 'true';
 
+        // Extract first 3-4 meaningful words to identify show
+        const searchTitle = extractShowIdentificationQuery(query);
+
         if (!force) {
-          const existing = await getSavedLogo(env, query);
+          const existing = (await getSavedLogo(env, query)) || (await getSavedLogo(env, searchTitle));
           if (existing) {
             return jsonResponse({
               query,
+              search_query_used: searchTitle,
               cached: true,
               saved: true,
               selected_result: { name: existing.show, tvdb_id: existing.tvdb_id },
               saved_logo: existing,
-              first_logo_url: existing.logo_url,
+              main_logo: existing.main_logo || existing.logo_url,
+              logo_url: existing.main_logo || existing.logo_url,
+              all_logos: existing.logos || [],
             });
           }
         }
 
-        const result = await searchAndGetLogos(query);
+        let result = await searchAndGetLogos(searchTitle);
+        if ((!result.logos?.logos || result.logos.logos.length === 0) && searchTitle !== query) {
+          const fallback = await searchAndGetLogos(query);
+          if (fallback.logos?.logos?.length > 0) result = fallback;
+        }
+
         let saved = null;
         if (result.logos?.logos?.length > 0) {
-          const firstLogo = result.logos.logos[0];
-          saved = await saveLogo(env, result.selected_result?.name || query, {
-            ...firstLogo,
-            tvdb_id: result.selected_result?.tvdb_id,
+          // Save ALL logos, defaulting main logo to the first logo
+          saved = await saveShowLogos(env, result.selected_result?.name || searchTitle, {
+            logos: result.logos.logos,
+            tvdbId: result.selected_result?.tvdb_id,
           });
         }
 
         return jsonResponse({
           ...result,
+          search_query_used: searchTitle,
           saved: !!saved,
           saved_logo: saved,
-          first_logo_url: saved?.logo_url || null,
+          main_logo: saved?.main_logo || null,
+          logo_url: saved?.main_logo || null,
+          all_logos: saved?.logos || [],
         });
       }
 
