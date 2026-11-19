@@ -563,11 +563,11 @@ export default {
 
       // API: Auto search + fetch logos using first 3-4 words & save all logos (first as main)
       if (path === '/api/auto') {
-        const query = url.searchParams.get('q');
+        const query = url.searchParams.get('q') || url.searchParams.get('query') || url.searchParams.get('show') || url.searchParams.get('name');
         if (!query) return errorResponse('Missing query parameter: q');
         const force = url.searchParams.get('force') === 'true';
 
-        // Extract first 3-4 meaningful words to identify show
+        // Extract clean show name using Series & Movies patterns
         const searchTitle = extractShowIdentificationQuery(query);
 
         if (!force) {

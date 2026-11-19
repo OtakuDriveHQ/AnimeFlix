@@ -27,33 +27,42 @@ export function normalizeShowKey(name) {
 }
 
 /**
- * Extract first 3-4 keywords from show title for auto-fetch identification
- * e.g. "Solo Leveling Season 2: Arise from the Shadow (2025) Dual Audio 1080p Web-DL" -> "Solo Leveling"
- *      "Attack on Titan Final Season Part 3 Dual Audio HEVC" -> "Attack on Titan Final"
- *      "Bleach: Thousand-Year Blood War - The Conflict Part 3" -> "Bleach Thousand Year Blood"
+ * Extract clean show name from title according to two primary patterns:
+ * Pattern 1 (TV/Series): "show name season 1 and suffix words"
+ *   -> Extracts the show name that appears BEFORE "season 1" (or "season", "s1", "seacon", etc.)
+ * Pattern 2 (Movies): "show name (year) and suffix words"
+ *   -> Extracts the show name that appears BEFORE "(year)" (or "[year]" or standalone 4-digit year)
+ * Fallback: Cleans slug hyphens/underscores and strips trailing release/quality/audio tags.
  */
 export function extractShowIdentificationQuery(raw) {
   if (!raw) return '';
-  let title = raw.replace(/https?:\/\/[^\/]+\//g, '').replace(/[-_]+/g, ' ');
+  // 1. Clean URL prefixes and convert hyphens/underscores to spaces
+  let text = raw.replace(/https?:\/\/[^\/]+\//g, '').replace(/[-_]+/g, ' ').trim();
 
-  // 1. Split at season/part/cour/year boundaries if present
-  const splitMatch = title.split(/\b(season\s*\d+|s\d+|part\s*\d+|cour\s*\d+|\(\d{4}\)|\[\d{4}\]|:\s*season|:\s*part)\b/i);
-  if (splitMatch && splitMatch[0] && splitMatch[0].trim().length >= 3) {
-    title = splitMatch[0];
+  // 2. Identify boundary:
+  // Pattern 1: Season indicators (e.g. "final season", "season 1", "season 01", "seacon 1", "s1", "s01", "cour 1", "part 1")
+  // Pattern 2: Year indicators (e.g. "(2024)", "[2024]", "(1999)", or standalone "2024")
+  const boundaryRegex = /\b(final\s+season|season\s*\d+|seacon\s*\d+|s\d+|cour\s*\d+|\(\s*(?:19|20)\d{2}\s*\)|\[\s*(?:19|20)\d{2}\s*\]|\b(?:19|20)\d{2}\b)/i;
+
+  const match = text.match(boundaryRegex);
+  if (match && typeof match.index === 'number' && match.index > 0) {
+    const candidate = text.substring(0, match.index).trim();
+    if (candidate.length >= 2) {
+      text = candidate;
+    }
   }
 
-  // 2. Remove common SEO, release years, quality and audio tags
-  title = title
-    .replace(/\b\d{4}\b/g, '')
-    .replace(/\b(download|watch online|full series|complete series|dual audio|multi audio|hindi dub|hindi|english|1080p|720p|480p|4k|2160p|hevc|web-dl|webrip|bluray|bd|remux|x264|x265|10bit|uncut|remastered|batch|full)\b/gi, '')
-    .replace(/[\(\)\[\]\{\}:;!?,.]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // 3. Clean trailing punctuation (colons, hyphens, dashes, brackets, commas, periods)
+  text = text.replace(/[:;\-–—/\\,.!?[\](){}]+$/g, '').trim();
 
-  // 3. Take first 3-4 words to identify the show accurately on TVmaze/Fanart.tv
-  const words = title.split(' ').filter(Boolean);
-  const targetWords = words.slice(0, Math.min(words.length, 4)).join(' ');
-  return targetWords || title;
+  // 4. Strip common trailing release/quality/audio noise if present
+  text = text.replace(/\b(download|watch online|dual audio|multi audio|hindi dub|hindi|english|japanese|1080p|720p|480p|4k|2160p|hevc|web-dl|webrip|bluray|bd|remux|x264|x265|10bit|uncut|remastered|batch|full)\b/gi, '').trim();
+
+  // 5. Clean trailing punctuation again and normalize spaces
+  text = text.replace(/[:;\-–—/\\,.!?[\](){}]+$/g, '').trim();
+  text = text.replace(/\s+/g, ' ').trim();
+
+  return text || raw;
 }
 
 /**
@@ -68,13 +77,25 @@ export async function getSavedLogo(env, showName) {
     try {
       const data = await env.LOGOS_KV.get(key, 'json');
       if (data) return data;
+
+      // Also check clean show name key if raw show name had season/year/noise
+      const cleanName = extractShowIdentificationQuery(showName);
+      const cleanKey = normalizeShowKey(cleanName);
+      if (cleanKey && cleanKey !== key) {
+        const cleanData = await env.LOGOS_KV.get(cleanKey, 'json');
+        if (cleanData) return cleanData;
+      }
     } catch (err) {
       console.warn(`[storage] KV get failed for ${key}:`, err.message);
     }
   }
 
   // 2. In-memory fallback
-  return memoryStore.get(key) || null;
+  if (memoryStore.has(key)) return memoryStore.get(key);
+  const cleanKey = normalizeShowKey(extractShowIdentificationQuery(showName));
+  if (cleanKey && memoryStore.has(cleanKey)) return memoryStore.get(cleanKey);
+
+  return null;
 }
 
 /**

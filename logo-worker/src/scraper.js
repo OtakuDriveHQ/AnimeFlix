@@ -33,6 +33,7 @@ async function searchShowsTVMaze(query) {
   const url = `${TVMAZE_API}/search/shows?q=${encodeURIComponent(query)}`;
   const response = await fetch(url, {
     headers: { 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(4000),
   });
 
   if (!response.ok) {
@@ -137,6 +138,7 @@ async function fetchFromWayback(tvdbId, showSlug) {
           'User-Agent': BROWSER_HEADERS['User-Agent'],
           'Accept': 'application/json',
         },
+        signal: AbortSignal.timeout(4000),
       });
       console.log(`[scraper] CDX status: ${cdxResponse.status}`);
       if (!cdxResponse.ok) {
@@ -203,6 +205,7 @@ async function fetchAndParseArchive(archiveUrl, tvdbId) {
     const response = await fetch(archiveUrl, {
       headers: BROWSER_HEADERS,
       redirect: 'follow',
+      signal: AbortSignal.timeout(4000),
     });
     console.log(`[scraper] fetchAndParseArchive response status: ${response.status}`);
 
@@ -233,6 +236,7 @@ async function fetchFromFanartDirect(tvdbId, showSlug) {
       const response = await fetch(url, {
         headers: BROWSER_HEADERS,
         redirect: 'follow',
+        signal: AbortSignal.timeout(4000),
       });
 
       if (!response.ok) continue;
@@ -269,6 +273,7 @@ async function verifyLogoUrls(logos) {
         const response = await fetch(logo.full_url, {
           method: 'HEAD',
           headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(3000),
         });
         return { ...logo, verified: response.ok, status: response.status };
       } catch {
@@ -375,22 +380,144 @@ async function getLogosByUrl(url) {
 }
 
 // ============================================================
+// STEP 1B: Search Movies using Cinemeta (free, public API)
+// ============================================================
+
+async function searchMoviesCinemeta(query) {
+  try {
+    const url = `https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(query)}.json`;
+    const response = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const metas = data.metas || [];
+
+    return metas.map(m => ({
+      name: m.name,
+      tvdb_id: null,
+      imdb_id: m.id || m.imdb_id || null,
+      type: 'Movie',
+      status: 'Released',
+      premiered: m.releaseInfo || null,
+      genres: m.genres || [],
+      rating: null,
+      image: m.poster || null,
+      summary: m.description || null,
+      score: 1.0,
+      fanart_url: null,
+    }));
+  } catch (err) {
+    console.warn('[scraper] Cinemeta movie search failed:', err.message);
+    return [];
+  }
+}
+
+async function getCinemetaMovieLogos(imdbId, showName) {
+  try {
+    const res = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${imdbId}.json`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const meta = data?.meta;
+    if (!meta) return null;
+
+    const logoList = [];
+    const directLogoUrl = meta.logo || `https://images.metahub.space/logo/medium/${imdbId}/img`;
+
+    // Verify direct logo URL
+    try {
+      const check = await fetch(directLogoUrl, { method: 'HEAD' });
+      if (check.ok) {
+        logoList.push({
+          full_url: directLogoUrl,
+          preview_url: directLogoUrl,
+          filename: `${imdbId}-logo.png`,
+          language: 'en',
+          id: 1,
+        });
+      }
+    } catch {}
+
+    return {
+      name: meta.name || showName,
+      tmdb_id: meta.moviedb_id || null,
+      imdb_id: imdbId,
+      logos: logoList,
+    };
+  } catch (err) {
+    console.warn('[scraper] Cinemeta meta fetch error:', err.message);
+    return null;
+  }
+}
+
+// ============================================================
 // Combined search + logo retrieval
 // ============================================================
 
 async function searchAndGetLogos(query) {
-  const searchResults = await searchShowsTVMaze(query);
+  // 1. Search TV shows on TVmaze first
+  let searchResults = [];
+  try {
+    searchResults = await searchShowsTVMaze(query);
+  } catch (e) {
+    console.warn('[scraper] TVmaze search failed:', e.message);
+  }
+
+  let isMovie = false;
+
+  // 2. If no TV shows found, search movies via Cinemeta
+  if (searchResults.length === 0) {
+    searchResults = await searchMoviesCinemeta(query);
+    if (searchResults.length > 0) isMovie = true;
+  }
 
   if (searchResults.length === 0) {
     return {
       query,
-      message: 'No TV shows found matching your search.',
+      message: 'No TV shows or movies found matching your search.',
       results: [],
     };
   }
 
+  // User specification: Always take the FIRST search result to auto fetch the logos
   const topResult = searchResults[0];
-  const logos = await getLogosByTVDBId(topResult.tvdb_id, topResult.name);
+
+  let logos = null;
+  if (!isMovie && topResult.tvdb_id) {
+    logos = await getLogosByTVDBId(topResult.tvdb_id, topResult.name);
+  }
+
+  // If no logos found or it is a movie, resolve via Cinemeta / Metahub
+  if (!logos || !logos.logos || logos.logos.length === 0) {
+    if (topResult.imdb_id) {
+      const movieMeta = await getCinemetaMovieLogos(topResult.imdb_id, topResult.name);
+      if (movieMeta && movieMeta.logos.length > 0) {
+        logos = {
+          show_name: topResult.name,
+          tvdb_id: topResult.tvdb_id || movieMeta.tmdb_id || null,
+          source: 'cinemeta',
+          logo_count: movieMeta.logos.length,
+          total_found: movieMeta.logos.length,
+          logos: movieMeta.logos,
+        };
+      }
+    }
+  }
+
+  if (!logos) {
+    logos = {
+      show_name: topResult.name,
+      tvdb_id: topResult.tvdb_id || null,
+      source: 'none',
+      logo_count: 0,
+      logos: [],
+      note: 'No HD clear logos could be retrieved for the first search result.',
+      asset_url_pattern: `${FANART_ASSETS}/fanart/tv/${topResult.tvdb_id || 0}/hdtvlogo/{filename}.png`,
+    };
+  }
 
   return {
     query,
