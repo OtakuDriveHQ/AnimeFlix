@@ -42,14 +42,21 @@ function matchInner(html, pattern) {
 export function scrapePost(html) {
   const banner = extractBanner(html);
   const thumbnail = extractThumbnail(html) || banner;
+  const publishedTime = extractPublishedTime(html);
+  const modifiedTime = extractModifiedTime(html);
+  const lastmod = modifiedTime || publishedTime || null;
 
   return {
-    title:     extractTitle(html),
-    thumbnail: thumbnail,
-    banner:    banner || thumbnail,
-    meta:      extractMeta(html),
-    synopsis:  extractSynopsis(html),
-    seasons:   extractSeasons(html),
+    title:         extractTitle(html),
+    thumbnail:     thumbnail,
+    banner:        banner || thumbnail,
+    publishedTime: publishedTime,
+    modifiedTime:  modifiedTime,
+    lastmod:       lastmod,
+    date:          lastmod,
+    meta:          extractMeta(html),
+    synopsis:      extractSynopsis(html),
+    seasons:       extractSeasons(html),
   };
 }
 
@@ -116,7 +123,32 @@ function extractSynopsis(html) {
   return stripTags(synMatch[1]).trim();
 }
 
-// ─── 6. Seasons + Episodes ────────────────────────────────────────────────────
+// ─── 6. Published & Modified Time (from article meta tags / schema) ───────────
+function extractPublishedTime(html) {
+  const metaMatch =
+    html.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i);
+  if (metaMatch) return metaMatch[1].trim();
+
+  const schemaMatch = html.match(/"datePublished"\s*:\s*"([^"]+)"/i);
+  if (schemaMatch) return schemaMatch[1].trim();
+
+  return null;
+}
+
+function extractModifiedTime(html) {
+  const metaMatch =
+    html.match(/<meta[^>]+property=["']article:modified_time["'][^>]+content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:modified_time["']/i);
+  if (metaMatch) return metaMatch[1].trim();
+
+  const schemaMatch = html.match(/"dateModified"\s*:\s*"([^"]+)"/i);
+  if (schemaMatch) return schemaMatch[1].trim();
+
+  return null;
+}
+
+// ─── 7. Seasons + Episodes ────────────────────────────────────────────────────
 function extractAccordionEpisodes(blockHtml) {
   const episodes = [];
   const itemRe = /<div\s+class="mks_accordion_item">([\s\S]*?)(?=<div\s+class="mks_accordion_item"|<\/div>\s*<\/div>|<\/div>\s*<hr|<\/div>\s*$)/gi;
