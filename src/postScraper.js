@@ -117,43 +117,130 @@ function extractSynopsis(html) {
 }
 
 // ─── 6. Seasons + Episodes ────────────────────────────────────────────────────
-function extractSeasons(html) {
-  const seasons = [];
+function extractAccordionEpisodes(blockHtml) {
+  const episodes = [];
+  const itemRe = /<div\s+class="mks_accordion_item">([\s\S]*?)(?=<div\s+class="mks_accordion_item"|<\/div>\s*<\/div>|<\/div>\s*<hr|<\/div>\s*$)/gi;
+  let m;
+  while ((m = itemRe.exec(blockHtml)) !== null) {
+    const block = m[1];
+    const headingM = block.match(/<div[^>]*mks_accordion_heading[^>]*>([\s\S]*?)<\/div>/i);
+    const label = headingM ? stripTags(headingM[1]).trim() : "";
 
-  // Match each season block starting with an accordion title
-  const seasonRegex = /<div class="schema-faq-section"[\s\S]*?<strong class="schema-faq-question">([\s\S]*?)<\/strong>([\s\S]*?)(?=<div class="schema-faq-section"|$)/gi;
-
-  let seasonMatch;
-  while ((seasonMatch = seasonRegex.exec(html)) !== null) {
-    const seasonName = stripTags(seasonMatch[1]).trim();
-    const seasonBody = seasonMatch[2];
-
-    const episodes = [];
-    const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
-    let pMatch;
-
-    while ((pMatch = pRegex.exec(seasonBody)) !== null) {
-      const pContent = pMatch[1];
-
-      const aRegex = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-      const links = [];
-      let aMatch;
-
-      while ((aMatch = aRegex.exec(pContent)) !== null) {
-        const href = aMatch[1].trim();
-        const text = stripTags(aMatch[2]).trim();
+    const links = [];
+    const linkRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    const contentM = block.match(/<div[^>]*mks_accordion_content[^>]*>([\s\S]*)/i);
+    if (contentM) {
+      let lm;
+      while ((lm = linkRe.exec(contentM[1])) !== null) {
+        const href = lm[1].trim();
+        const text = stripTags(lm[2]).trim();
         if (href && !href.startsWith("#")) {
           links.push({ text, href });
         }
       }
+    }
 
-      if (links.length > 0) {
-        const labelText = stripTags(pContent.replace(/<a[\s\S]*?<\/a>/gi, "")).trim();
-        const label = labelText.replace(/[:\-\s]+$/, "").trim() || links[0].text;
-        episodes.push({ label, links });
+    if (label && links.length > 0) {
+      episodes.push({ label, links });
+    }
+  }
+  return episodes;
+}
+
+function extractSeasons(html) {
+  const contentMatch = html.match(/<div[^>]*class="[^"]*entry-content[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<!-- \.entry-content -->/i)
+    || html.match(/<div[^>]*class="[^"]*entry-content[^"]*"[^>]*>([\s\S]*)/i);
+
+  const contentHtml = contentMatch ? contentMatch[1] : html;
+
+  const accPositions = [];
+  const accRegex = /<div\s+class="mks_accordion">/gi;
+  let am;
+  while ((am = accRegex.exec(contentHtml)) !== null) {
+    accPositions.push(am.index);
+  }
+
+  if (accPositions.length === 0) {
+    // Fallback 1: check schema-faq-section
+    const seasonRegex = /<div class="schema-faq-section"[\s\S]*?<strong class="schema-faq-question">([\s\S]*?)<\/strong>([\s\S]*?)(?=<div class="schema-faq-section"|$)/gi;
+    let seasonMatch;
+    const faqSeasons = [];
+    while ((seasonMatch = seasonRegex.exec(contentHtml)) !== null) {
+      const seasonName = stripTags(seasonMatch[1]).trim();
+      const seasonBody = seasonMatch[2];
+      const episodes = [];
+      const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
+      let pMatch;
+      while ((pMatch = pRegex.exec(seasonBody)) !== null) {
+        const pContent = pMatch[1];
+        const aRegex = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        const links = [];
+        let aMatch;
+        while ((aMatch = aRegex.exec(pContent)) !== null) {
+          const href = aMatch[1].trim();
+          const text = stripTags(aMatch[2]).trim();
+          if (href && !href.startsWith("#")) links.push({ text, href });
+        }
+        if (links.length > 0) {
+          const labelText = stripTags(pContent.replace(/<a[\s\S]*?<\/a>/gi, "")).trim();
+          const label = labelText.replace(/[:\-\s]+$/, "").trim() || links[0].text;
+          episodes.push({ label, links });
+        }
+      }
+      if (episodes.length > 0) {
+        faqSeasons.push({ name: seasonName, episodes });
+      }
+    }
+    if (faqSeasons.length > 0) return faqSeasons;
+
+    // Fallback 2: Direct download buttons in entry-content (e.g. some movies)
+    const directButtons = [];
+    const btnRe = /<a[^>]+(?:class="[^"]*(?:mks_button|btn_download|download-btn)[^"]*"|href="https:\/\/archive\.toonworld4all\.me\/[^"]+")[^>]*>([\s\S]*?)<\/a>/gi;
+    let bm;
+    while ((bm = btnRe.exec(contentHtml)) !== null) {
+      const hrefMatch = bm[0].match(/href="([^"]+)"/i);
+      if (hrefMatch && !hrefMatch[1].startsWith("#")) {
+        directButtons.push({ text: stripTags(bm[1]).trim() || "Download", href: hrefMatch[1].trim() });
+      }
+    }
+    if (directButtons.length > 0) {
+      return [{
+        name: "MOVIE",
+        episodes: [{ label: "Full Movie", links: directButtons }]
+      }];
+    }
+
+    return [];
+  }
+
+  const seasons = [];
+  for (let i = 0; i < accPositions.length; i++) {
+    const start = accPositions[i];
+    const end = i + 1 < accPositions.length ? accPositions[i + 1] : contentHtml.length;
+    const block = contentHtml.slice(start, end);
+
+    const beforeBlock = contentHtml.slice(Math.max(0, start - 800), start);
+    // Find headings or paragraphs with SEASON
+    const headingMatches = [...beforeBlock.matchAll(/(?:<p[^>]*>|<h[1-6][^>]*>|<div[^>]*>)([\s\S]*?)(?:<\/p>|<\/h[1-6]>|<\/div>)/gi)];
+    let seasonName = "";
+    if (headingMatches.length > 0) {
+      for (let j = headingMatches.length - 1; j >= 0; j--) {
+        const raw = stripTags(headingMatches[j][1]).replace(/^[|–—\s]+|[|–—\s]+$/g, "").trim();
+        // Avoid NOTE paragraphs or generic text
+        if (/^NOTE\s*:/i.test(raw)) continue;
+        if (/DOWNLOAD\s+[\w\s:]+EPISODES/i.test(raw)) continue;
+        if (/SEASON\s*[\dIVXLCDM\w]+/i.test(raw) && raw.length <= 80) {
+          seasonName = raw;
+          break;
+        }
       }
     }
 
+    if (!seasonName) {
+      seasonName = accPositions.length > 1 ? `SEASON ${i + 1}` : "SEASON 1";
+    }
+
+    const episodes = extractAccordionEpisodes(block);
     if (episodes.length > 0) {
       seasons.push({ name: seasonName, episodes });
     }
