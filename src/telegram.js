@@ -374,11 +374,15 @@ export async function extractFoxcloudLink(foxcloudUrl) {
  * @param {string} gdflixUrl
  * @returns {Promise<string|null>}
  */
-export async function extractInstantDownloadLink(gdflixUrl, hubcloudUrl = null) {
-  if (!gdflixUrl && !hubcloudUrl) return null;
+export async function extractInstantDownloadLink(gdflixUrl, hubcloudUrl = null, filepressUrl = null) {
+  if (!gdflixUrl && !hubcloudUrl && !filepressUrl) return null;
 
   if (gdflixUrl && /hubcloud|gamerxyt|sportverse/i.test(gdflixUrl)) {
     return await extractHubcloudDownloadLink(gdflixUrl);
+  }
+
+  if (gdflixUrl && /filepress|fpgo|filebee/i.test(gdflixUrl)) {
+    return await extractFilepressDownloadLink(gdflixUrl);
   }
 
   if (gdflixUrl) {
@@ -386,9 +390,20 @@ export async function extractInstantDownloadLink(gdflixUrl, hubcloudUrl = null) 
     if (direct) return direct;
   }
 
-  // Automatic Fallback to HubCloud if GDFlix extraction failed
+  // Automatic Fallback to FilePress if GDFlix extraction failed
+  if (filepressUrl) {
+    console.log("GDFlix extraction failed. Falling back to FilePress:", filepressUrl);
+    try {
+      const fpRes = await extractFilepressDownloadLink(filepressUrl);
+      if (fpRes) return fpRes;
+    } catch (e) {
+      console.warn("Fallback to FilePress failed:", e.message);
+    }
+  }
+
+  // Automatic Fallback to HubCloud if GDFlix and FilePress failed
   if (hubcloudUrl) {
-    console.log("GDFlix extraction failed. Falling back to HubCloud:", hubcloudUrl);
+    console.log("GDFlix/FilePress extraction failed. Falling back to HubCloud:", hubcloudUrl);
     try {
       const hubRes = await extractHubcloudDownloadLink(hubcloudUrl);
       if (hubRes) return hubRes;
@@ -881,6 +896,93 @@ export async function extractHubcloudDownloadLink(hubcloudUrl, retries = 1, debu
       console.warn("extractHubcloudDownloadLink error:", err.message);
     }
   }
+  return null;
+}
+
+/**
+ * Extract direct CDN download link from FilePress Fast Download (gpixelFastDownload).
+ *
+ * @param {string} filepressUrl e.g. "https://new4.filepress.lat/file/6b007da778ecfdfd0fadb406"
+ * @returns {Promise<string|null>}
+ */
+export async function extractFilepressDownloadLink(filepressUrl) {
+  if (!filepressUrl) return null;
+
+  const GOOGLE_RE = /https?:\/\/video-downloads\.googleusercontent\.com\/[^\s"'<>]+/i;
+  if (GOOGLE_RE.test(filepressUrl)) {
+    return filepressUrl.match(GOOGLE_RE)[0];
+  }
+
+  // Extract 24-character hexadecimal MongoDB ObjectId
+  let targetUrl = filepressUrl;
+  let fileIdMatch = targetUrl.match(/\/file\/([a-f0-9]{24})/i);
+
+  if (!fileIdMatch && targetUrl.includes("/redirect/")) {
+    try {
+      const decrypted = await decryptRedirectUrl(targetUrl);
+      if (decrypted) {
+        targetUrl = decrypted;
+        fileIdMatch = targetUrl.match(/\/file\/([a-f0-9]{24})/i);
+      }
+    } catch {}
+  }
+
+  if (!fileIdMatch) return null;
+  const fileId = fileIdMatch[1];
+
+  let origin = "https://new4.filepress.lat";
+  try {
+    const u = new URL(targetUrl);
+    if (u.origin && u.origin.startsWith("http")) origin = u.origin;
+  } catch {}
+
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": targetUrl,
+  };
+
+  try {
+    // Step 1: Request initial download session
+    const initRes = await fetch(`${origin}/api/file/downlaod/`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: fileId,
+        method: "gpixelFastDownload",
+        captchaValue: "",
+      }),
+    });
+
+    if (!initRes.ok) return null;
+    const initData = await initRes.json();
+    if (!initData || !initData.status || !initData.data) return null;
+
+    const downloadSessionId = initData.data;
+
+    // Step 2: Request final direct download CDN link
+    const finalRes = await fetch(`${origin}/api/file/downlaod2/`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: downloadSessionId,
+        method: "gpixelFastDownload",
+        captchaValue: "",
+      }),
+    });
+
+    if (!finalRes.ok) return null;
+    const finalData = await finalRes.json();
+    if (!finalData || !finalData.status || typeof finalData.data !== "string") return null;
+
+    if (/^https?:\/\//i.test(finalData.data)) {
+      return finalData.data;
+    }
+  } catch (err) {
+    console.error("extractFilepressDownloadLink error:", err?.message || err);
+  }
+
   return null;
 }
 

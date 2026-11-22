@@ -6,7 +6,7 @@
  * and generates the fresh direct download link on demand when the user clicks.
  */
 
-import { extractInstantDownloadLink, extractHubcloudDownloadLink, escapeHtml } from "./telegram.js";
+import { extractInstantDownloadLink, extractHubcloudDownloadLink, extractFilepressDownloadLink, escapeHtml } from "./telegram.js";
 
 /**
  * Main router for public /d/* routes.
@@ -71,7 +71,10 @@ export async function handleDownloadPage(request, env, url) {
     try {
       let directUrl = null;
       if (dlInfo.gdflixUrl) {
-        directUrl = await extractInstantDownloadLink(dlInfo.gdflixUrl, dlInfo.hubcloudUrl);
+        directUrl = await extractInstantDownloadLink(dlInfo.gdflixUrl, dlInfo.hubcloudUrl, dlInfo.filepressUrl);
+      }
+      if (!directUrl && dlInfo.filepressUrl) {
+        directUrl = await extractFilepressDownloadLink(dlInfo.filepressUrl);
       }
       if (!directUrl && dlInfo.hubcloudUrl) {
         directUrl = await extractHubcloudDownloadLink(dlInfo.hubcloudUrl);

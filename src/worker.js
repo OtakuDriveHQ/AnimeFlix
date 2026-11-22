@@ -21,6 +21,7 @@ import {
   getTelegramWebhookInfo,
   extractInstantDownloadLink,
   extractHubcloudDownloadLink,
+  extractFilepressDownloadLink,
   escapeHtml,
 } from "./telegram.js";
 import { isAuthenticated, handleLogin, handleLogout } from "./auth.js";
@@ -224,6 +225,8 @@ async function handleExtractDirect(url, request) {
   const raw = url.searchParams.get("url");
   if (!raw) return errorResponse(400, "Missing ?url=");
   const type = (url.searchParams.get("type") || "").toLowerCase();
+  const filepressUrl = url.searchParams.get("filepressUrl") ? decodeURIComponent(url.searchParams.get("filepressUrl")) : null;
+  const hubcloudUrl = url.searchParams.get("hubcloudUrl") ? decodeURIComponent(url.searchParams.get("hubcloudUrl")) : null;
   const isDebug = url.searchParams.get("debug") === "1";
   const debugLogs = [];
   let target;
@@ -234,16 +237,32 @@ async function handleExtractDirect(url, request) {
     let directUrl = null;
     let usedPlatform = "gdflix";
 
-    if (type === "hubcloud" || /hubcloud|gamerxyt|sportverse/i.test(target)) {
+    if (type === "filepress" || /filepress|fpgo|filebee/i.test(target)) {
+      directUrl = await extractFilepressDownloadLink(target);
+      usedPlatform = "filepress";
+    } else if (type === "hubcloud" || /hubcloud|gamerxyt|sportverse/i.test(target)) {
       directUrl = await extractHubcloudDownloadLink(target, 1, debugLogs);
       usedPlatform = "hubcloud";
     } else {
-      directUrl = await extractInstantDownloadLink(target);
-      usedPlatform = "gdflix";
-      // Fallback: if gdflix failed and hubcloud was provided
-      if (!directUrl && url.searchParams.get("hubcloudUrl")) {
-        const hubUrl = decodeURIComponent(url.searchParams.get("hubcloudUrl"));
-        directUrl = await extractHubcloudDownloadLink(hubUrl, 1, debugLogs);
+      // 1. Try GDFlix first
+      try {
+        directUrl = await extractInstantDownloadLink(target);
+        usedPlatform = "gdflix";
+      } catch (e) {
+        debugLogs.push("GDFlix error: " + (e.message || e));
+      }
+
+      // 2. Fallback: if GDFlix failed, use FilePress final CDN process!
+      if (!directUrl && filepressUrl) {
+        debugLogs.push("GDFlix failed, trying FilePress fallback: " + filepressUrl);
+        directUrl = await extractFilepressDownloadLink(filepressUrl);
+        if (directUrl) usedPlatform = "filepress";
+      }
+
+      // 3. Fallback: if both failed and hubcloud was provided
+      if (!directUrl && hubcloudUrl) {
+        debugLogs.push("Trying Hubcloud fallback: " + hubcloudUrl);
+        directUrl = await extractHubcloudDownloadLink(hubcloudUrl, 1, debugLogs);
         if (directUrl) usedPlatform = "hubcloud";
       }
     }
@@ -252,7 +271,7 @@ async function handleExtractDirect(url, request) {
       const res = { ok: true, directUrl, target, platform: usedPlatform, debug: debugLogs };
       return jsonResponse(res);
     }
-    const errText = "Could not generate direct CDN link for this platform.\\nDebug: " + debugLogs.join(" | ");
+    const errText = "Could not generate direct CDN link for this platform.\nDebug: " + debugLogs.join(" | ");
     const res = { ok: false, error: errText, debug: debugLogs };
     return jsonResponse(res, 200);
   } catch (err) {
